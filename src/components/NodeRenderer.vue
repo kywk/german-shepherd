@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { DiagramNode, DiffState } from '@/types/index'
 import { NODE_TYPE_CATEGORY, NODE_TYPE_ICONS } from '@/types/index'
 
@@ -14,8 +15,8 @@ const props = defineProps<{
   diffState?: DiffState
 }>()
 
-const category = NODE_TYPE_CATEGORY[props.node.type] ?? 'server'
-const colorVar = `var(--node-${category})`
+const category = computed(() => NODE_TYPE_CATEGORY[props.node.type] ?? 'server')
+const colorVar = computed(() => `var(--node-${category.value})`)
 
 // icon theme: fa class → unicode codepoint map
 const FA_UNICODE: Record<string, string> = {

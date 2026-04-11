@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useDiagramStore } from '@/stores/diagramStore'
+import { useDark, useToggle } from '@vueuse/core'
 import DiagramRenderer from './DiagramRenderer.vue'
 
 const diagramStore = useDiagramStore()
@@ -8,16 +9,18 @@ const diagramStore = useDiagramStore()
 // View overrides (don't modify raw text)
 const displayOverride = ref<'LR' | 'TD' | null>(null)
 const themeOverride = ref<'simple' | 'icon' | 'image' | null>(null)
-const isDark = ref(document.documentElement.getAttribute('data-theme') !== 'light')
+
+const isDark = useDark({
+  selector: 'html',
+  attribute: 'data-theme',
+  valueDark: 'dark',
+  valueLight: 'light',
+})
+const toggleTheme = useToggle(isDark)
 
 const display = computed(() => displayOverride.value ?? diagramStore.parsedDiagram.meta.display)
 const theme = computed(() => themeOverride.value ?? diagramStore.parsedDiagram.meta.theme)
 const title = computed(() => diagramStore.parsedDiagram.meta.title || 'German Shepherd')
-
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.setAttribute('data-theme', isDark.value ? 'dark' : 'light')
-}
 </script>
 
 <template>
@@ -73,7 +76,7 @@ function toggleTheme() {
         <!-- Dark/light toggle -->
         <button
           class="btn btn-ghost theme-toggle"
-          @click="toggleTheme"
+          @click="toggleTheme()"
           :title="isDark ? '切換淺色主題' : '切換深色主題'"
         >
           <i :class="isDark ? 'fa-solid fa-sun' : 'fa-solid fa-moon'"></i>
