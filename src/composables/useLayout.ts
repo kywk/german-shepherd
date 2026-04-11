@@ -5,11 +5,11 @@ import { isZone } from '@/types/index'
 export interface NodeRect { x: number; y: number; w: number; h: number }
 export interface ZoneRect { x: number; y: number; w: number; h: number; depth: number; name: string; rootName: string }
 
-const NODE_GAP = 16
-const ZONE_PAD = 12
+const NODE_GAP = 32
+const ZONE_PAD = 24
 const ZONE_HEADER = 28
-const ZONE_GAP = 20
-const MARGIN = 24
+const ZONE_GAP = 40
+const MARGIN = 32
 const MAX_PER_COL = 4
 
 interface LayoutResult {

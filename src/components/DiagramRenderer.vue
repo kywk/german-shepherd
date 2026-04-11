@@ -143,6 +143,7 @@ function nodeSize() {
             :connection="conn"
             :from-pos="layout.nodeRects.get(conn.from) ?? { x: 0, y: 0, w: 0, h: 0 }"
             :to-pos="layout.nodeRects.get(conn.to) ?? { x: 0, y: 0, w: 0, h: 0 }"
+            :all-node-rects="layout.nodeRects"
           />
         </g>
 
