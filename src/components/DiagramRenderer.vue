@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import type { NetworkDiagram, LintDiagnostic } from '@/types/index'
-import { useLayout } from '@/composables/useLayout'
+import { useLayout, type NodeRect } from '@/composables/useLayout'
 import NodeRenderer from './NodeRenderer.vue'
 import ConnectionRenderer from './ConnectionRenderer.vue'
 
@@ -40,10 +40,107 @@ function onMouseUp() { isPanning.value = false }
 
 useEventListener(svgRef, 'wheel', onWheel, { passive: false })
 
-// Layout — pass theme so node sizes are correct
 const layout = useLayout(() => props.diagram, () => props.display, () => props.theme)
 
-// Zone color map: rootName → CSS var
+// ---- Port assignment ----
+type Side = 'top' | 'bottom' | 'left' | 'right'
+
+function chooseSide(from: NodeRect, to: NodeRect): { fromSide: Side; toSide: Side } {
+  const fcx = from.x + from.w / 2
+  const fcy = from.y + from.h / 2
+  const tcx = to.x + to.w / 2
+  const tcy = to.y + to.h / 2
+  const dx = tcx - fcx
+  const dy = tcy - fcy
+
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0
+      ? { fromSide: 'right', toSide: 'left' }
+      : { fromSide: 'left', toSide: 'right' }
+  } else {
+    return dy >= 0
+      ? { fromSide: 'bottom', toSide: 'top' }
+      : { fromSide: 'top', toSide: 'bottom' }
+  }
+}
+
+interface PortPoint { x: number; y: number }
+
+/**
+ * Compute port positions for all connections.
+ * Each node+side gets up to 3 ports, evenly distributed along that edge.
+ */
+const portMap = computed(() => {
+  const rects = layout.value.nodeRects
+  const conns = props.diagram.connections
+
+  // Step 1: collect which connections use which node+side
+  // key = "nodeName:side", value = list of connection indices
+  const sideUsage = new Map<string, number[]>()
+
+  const connSides: { fromSide: Side; toSide: Side }[] = []
+
+  for (let i = 0; i < conns.length; i++) {
+    const c = conns[i]
+    const fromR = rects.get(c.from)
+    const toR = rects.get(c.to)
+    if (!fromR || !toR) {
+      connSides.push({ fromSide: 'right', toSide: 'left' })
+      continue
+    }
+    const sides = chooseSide(fromR, toR)
+    connSides.push(sides)
+
+    const fk = `${c.from}:${sides.fromSide}`
+    const tk = `${c.to}:${sides.toSide}`
+    if (!sideUsage.has(fk)) sideUsage.set(fk, [])
+    sideUsage.get(fk)!.push(i)
+    if (!sideUsage.has(tk)) sideUsage.set(tk, [])
+    sideUsage.get(tk)!.push(i)
+  }
+
+  // Step 2: for each connection, compute the actual port x,y
+  function portOnSide(rect: NodeRect, side: Side, index: number, total: number): PortPoint {
+    // Distribute ports evenly along the edge
+    const t = total === 1 ? 0.5 : (index + 1) / (total + 1)
+    switch (side) {
+      case 'left':   return { x: rect.x,          y: rect.y + rect.h * t }
+      case 'right':  return { x: rect.x + rect.w, y: rect.y + rect.h * t }
+      case 'top':    return { x: rect.x + rect.w * t, y: rect.y }
+      case 'bottom': return { x: rect.x + rect.w * t, y: rect.y + rect.h }
+    }
+  }
+
+  const result: { from: PortPoint; to: PortPoint }[] = []
+
+  for (let i = 0; i < conns.length; i++) {
+    const c = conns[i]
+    const fromR = rects.get(c.from)
+    const toR = rects.get(c.to)
+    if (!fromR || !toR) {
+      result.push({ from: { x: 0, y: 0 }, to: { x: 0, y: 0 } })
+      continue
+    }
+
+    const { fromSide, toSide } = connSides[i]
+
+    const fk = `${c.from}:${fromSide}`
+    const tk = `${c.to}:${toSide}`
+    const fList = sideUsage.get(fk)!
+    const tList = sideUsage.get(tk)!
+    const fIdx = fList.indexOf(i)
+    const tIdx = tList.indexOf(i)
+
+    result.push({
+      from: portOnSide(fromR, fromSide, fIdx, fList.length),
+      to: portOnSide(toR, toSide, tIdx, tList.length),
+    })
+  }
+
+  return result
+})
+
+// Zone colors
 const ZONE_COLORS = [
   'var(--zone-color-1)', 'var(--zone-color-2)', 'var(--zone-color-3)',
   'var(--zone-color-4)', 'var(--zone-color-5)', 'var(--zone-color-6)',
@@ -53,13 +150,11 @@ const zoneColorMap = computed(() => {
   props.diagram.zones.forEach((z, i) => map.set(z.name, ZONE_COLORS[i % ZONE_COLORS.length]))
   return map
 })
-
-// Use rootName (tracked in ZoneRect) for consistent sub-zone coloring
 function zoneColor(rootName: string): string {
   return zoneColorMap.value.get(rootName) ?? ZONE_COLORS[0]
 }
 
-// Lint: isolated-node warning set
+// Lint warning nodes
 const lintWarnNodes = computed(() => {
   const s = new Set<string>()
   for (const d of props.lintDiagnostics ?? []) {
@@ -71,7 +166,6 @@ const lintWarnNodes = computed(() => {
   return s
 })
 
-// Node size matches layout
 function nodeSize() {
   return props.theme === 'simple' ? { w: 140, h: 64 } : { w: 100, h: 90 }
 }
@@ -102,7 +196,7 @@ function nodeSize() {
       </defs>
 
       <g :transform="`translate(${pan.x}, ${pan.y}) scale(${zoom})`">
-        <!-- Zones (back to front by depth) -->
+        <!-- Zones -->
         <g class="zones">
           <g v-for="zr in layout.zoneRects" :key="zr.name + zr.x + zr.y">
             <rect
@@ -114,7 +208,6 @@ function nodeSize() {
               stroke-opacity="0.4"
               stroke-width="1"
             />
-            <!-- Title bar (two rects to get flat bottom) -->
             <rect
               :x="zr.x" :y="zr.y" :width="zr.w" height="24"
               rx="8"
@@ -138,12 +231,11 @@ function nodeSize() {
         <!-- Connections -->
         <g class="connections">
           <ConnectionRenderer
-            v-for="conn in diagram.connections"
+            v-for="(conn, i) in diagram.connections"
             :key="`${conn.from}-${conn.to}-${conn.line}`"
             :connection="conn"
-            :from-pos="layout.nodeRects.get(conn.from) ?? { x: 0, y: 0, w: 0, h: 0 }"
-            :to-pos="layout.nodeRects.get(conn.to) ?? { x: 0, y: 0, w: 0, h: 0 }"
-            :all-node-rects="layout.nodeRects"
+            :from-port="portMap[i]?.from ?? { x: 0, y: 0 }"
+            :to-port="portMap[i]?.to ?? { x: 0, y: 0 }"
           />
         </g>
 
