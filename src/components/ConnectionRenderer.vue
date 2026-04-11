@@ -11,58 +11,115 @@ const props = defineProps<{
   allNodeRects?: Map<string, NodeRect>
 }>()
 
-const MARGIN = 12 // clearance from node edges
+const GAP = 14 // clearance from node edges
 
 /**
- * Find a corridor value (X for horizontal routing, Y for vertical)
- * that doesn't pass through any node rect.
- * Tries midpoint first, then scans for a clear gap.
+ * For H→V→H routing (left/right exits):
+ *   path = x1→midX (at y1), midX (y1→y2), midX→x2 (at y2)
+ *   The vertical segment at x=midX spans y1..y2.
+ *   We need midX to not intersect any node in that Y band.
+ *
+ * Strategy: collect all "forbidden X intervals" from nodes that overlap the Y band,
+ * then find the gap closest to the midpoint.
  */
-function findClearCorridor(
-  axis: 'x' | 'y',
-  corridorMin: number, corridorMax: number,
-  fixedMin: number, fixedMax: number, // the perpendicular range the corridor must clear
-  preferred: number
-): number {
+function findClearX(x1: number, y1: number, x2: number, y2: number): number {
+  const preferred = (x1 + x2) / 2
   if (!props.allNodeRects) return preferred
 
+  const yLo = Math.min(y1, y2)
+  const yHi = Math.max(y1, y2)
   const fromName = props.connection.from
   const toName = props.connection.to
 
-  function blocked(val: number): boolean {
-    for (const [name, r] of props.allNodeRects!) {
-      if (name === fromName || name === toName) continue
-      if (axis === 'x') {
-        // corridor is a vertical line at x=val, spanning fixedMin..fixedMax
-        if (val > r.x - MARGIN && val < r.x + r.w + MARGIN &&
-            fixedMax > r.y - MARGIN && fixedMin < r.y + r.h + MARGIN) return true
-      } else {
-        // corridor is a horizontal line at y=val, spanning fixedMin..fixedMax
-        if (val > r.y - MARGIN && val < r.y + r.h + MARGIN &&
-            fixedMax > r.x - MARGIN && fixedMin < r.x + r.w + MARGIN) return true
-      }
-    }
-    return false
-  }
-
-  if (!blocked(preferred)) return preferred
-
-  // Scan candidate positions: node edges ± MARGIN within the corridor range
-  const candidates: number[] = []
-  for (const [name, r] of props.allNodeRects!) {
+  // Collect forbidden X intervals: nodes whose Y range overlaps [yLo, yHi]
+  const forbidden: [number, number][] = []
+  for (const [name, r] of props.allNodeRects) {
     if (name === fromName || name === toName) continue
-    const lo = axis === 'x' ? r.x - MARGIN : r.y - MARGIN
-    const hi = axis === 'x' ? r.x + r.w + MARGIN : r.y + r.h + MARGIN
-    if (lo >= corridorMin && lo <= corridorMax) candidates.push(lo)
-    if (hi >= corridorMin && hi <= corridorMax) candidates.push(hi)
+    if (r.y + r.h + GAP < yLo || r.y - GAP > yHi) continue // no Y overlap
+    forbidden.push([r.x - GAP, r.x + r.w + GAP])
   }
-  candidates.push(corridorMin, corridorMax)
-  candidates.sort((a, b) => a - b)
 
-  // Pick the candidate closest to preferred that is clear
+  if (forbidden.length === 0) return preferred
+
+  // Merge forbidden intervals
+  forbidden.sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const iv of forbidden) {
+    if (merged.length && iv[0] <= merged[merged.length - 1][1]) {
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1])
+    } else {
+      merged.push([...iv])
+    }
+  }
+
+  // Check if preferred is clear
+  function isClear(x: number) {
+    return !merged.some(([lo, hi]) => x >= lo && x <= hi)
+  }
+  if (isClear(preferred)) return preferred
+
+  // Find gaps between forbidden intervals; pick gap midpoint closest to preferred
+  const candidates: number[] = []
+  // Gap before first interval
+  candidates.push(merged[0][0] - GAP)
+  // Gaps between intervals
+  for (let i = 0; i < merged.length - 1; i++) {
+    candidates.push((merged[i][1] + merged[i + 1][0]) / 2)
+  }
+  // Gap after last interval
+  candidates.push(merged[merged.length - 1][1] + GAP)
+
   candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred))
   for (const c of candidates) {
-    if (!blocked(c)) return c
+    if (isClear(c)) return c
+  }
+  return preferred
+}
+
+/** Same logic for V→H→V routing (top/bottom exits), finding clear Y. */
+function findClearY(x1: number, y1: number, x2: number, y2: number): number {
+  const preferred = (y1 + y2) / 2
+  if (!props.allNodeRects) return preferred
+
+  const xLo = Math.min(x1, x2)
+  const xHi = Math.max(x1, x2)
+  const fromName = props.connection.from
+  const toName = props.connection.to
+
+  const forbidden: [number, number][] = []
+  for (const [name, r] of props.allNodeRects) {
+    if (name === fromName || name === toName) continue
+    if (r.x + r.w + GAP < xLo || r.x - GAP > xHi) continue
+    forbidden.push([r.y - GAP, r.y + r.h + GAP])
+  }
+
+  if (forbidden.length === 0) return preferred
+
+  forbidden.sort((a, b) => a[0] - b[0])
+  const merged: [number, number][] = []
+  for (const iv of forbidden) {
+    if (merged.length && iv[0] <= merged[merged.length - 1][1]) {
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], iv[1])
+    } else {
+      merged.push([...iv])
+    }
+  }
+
+  function isClear(y: number) {
+    return !merged.some(([lo, hi]) => y >= lo && y <= hi)
+  }
+  if (isClear(preferred)) return preferred
+
+  const candidates: number[] = []
+  candidates.push(merged[0][0] - GAP)
+  for (let i = 0; i < merged.length - 1; i++) {
+    candidates.push((merged[i][1] + merged[i + 1][0]) / 2)
+  }
+  candidates.push(merged[merged.length - 1][1] + GAP)
+
+  candidates.sort((a, b) => Math.abs(a - preferred) - Math.abs(b - preferred))
+  for (const c of candidates) {
+    if (isClear(c)) return c
   }
   return preferred
 }
@@ -79,24 +136,14 @@ const route = computed(() => {
     if (Math.abs(y2 - y1) < 2) {
       path = `M ${x1} ${y1} L ${x2} ${y2}`
     } else {
-      const midX = findClearCorridor(
-        'x',
-        Math.min(x1, x2), Math.max(x1, x2),
-        Math.min(y1, y2), Math.max(y1, y2),
-        (x1 + x2) / 2
-      )
+      const midX = findClearX(x1, y1, x2, y2)
       path = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
     }
   } else {
     if (Math.abs(x2 - x1) < 2) {
       path = `M ${x1} ${y1} L ${x2} ${y2}`
     } else {
-      const midY = findClearCorridor(
-        'y',
-        Math.min(y1, y2), Math.max(y1, y2),
-        Math.min(x1, x2), Math.max(x1, x2),
-        (y1 + y2) / 2
-      )
+      const midY = findClearY(x1, y1, x2, y2)
       path = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
     }
   }
