@@ -249,6 +249,7 @@ function nodeSize() {
             :from-port="portMap[i]?.from ?? { x: 0, y: 0 }"
             :to-port="portMap[i]?.to ?? { x: 0, y: 0 }"
             :from-side="portMap[i]?.fromSide ?? 'right'"
+            :all-node-rects="layout.nodeRects"
           />
         </g>
 
