@@ -1,0 +1,28 @@
+# German-Shepherd Task List
+
+- [ ] **Phase 1: Project Initialization**
+    - [ ] Initialize Vite project (Vue + TS)
+    - [ ] Install dependencies (Vue, Pinia, VueUse, etc.)
+    - [ ] Set up CSS design system (copy/ref variables from border-collie)
+- [ ] **Phase 2: Data Models & Types**
+    - [ ] Define core interfaces (DiagramMeta, Node, Zone, Connection)
+- [ ] **Phase 3: Parser & Linter**
+    - [ ] Implement MetaParser (Header section)
+    - [ ] Implement DiagramParser (DSL section)
+    - [ ] Implement Linter (validation logic)
+    - [ ] Add unit tests for parser/linter
+- [ ] **Phase 4: State Management**
+    - [ ] Implement `workspaceStore` (Pinia + localStorage)
+    - [ ] Implement `diagramStore` (Reactive parsing)
+- [ ] **Phase 5: UI Components**
+    - [ ] Implement `SplitPane` (layout)
+    - [ ] Implement `EditorPanel` & `TextEditor`
+    - [ ] Implement `WorkspaceDropdown`
+    - [ ] Implement `DiagramPanel` & `DiagramRenderer` (SVG)
+    - [ ] Implement `NodeRenderer` & `ConnectionRenderer`
+- [ ] **Phase 6: Integration**
+    - [ ] Finalize `App.vue`
+    - [ ] Implement theme/display switching logic
+- [ ] **Phase 7: Verification**
+    - [ ] Run full validation suite
+    - [ ] Manual verification and polish
