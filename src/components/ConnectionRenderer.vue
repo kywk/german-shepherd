@@ -6,6 +6,7 @@ const props = defineProps<{
   connection: DiagramConnection
   fromPort: { x: number; y: number }
   toPort: { x: number; y: number }
+  fromSide: 'top' | 'bottom' | 'left' | 'right'
 }>()
 
 const route = computed(() => {
@@ -13,26 +14,27 @@ const route = computed(() => {
   const { x: x2, y: y2 } = props.toPort
   if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) return null
 
-  const dx = Math.abs(x2 - x1)
-  const dy = Math.abs(y2 - y1)
   let path: string
 
-  if (dx < 2 && dy < 2) {
-    path = `M ${x1} ${y1} L ${x2} ${y2}`
-  } else if (dy < 2) {
-    // Straight horizontal
-    path = `M ${x1} ${y1} L ${x2} ${y2}`
-  } else if (dx < 2) {
-    // Straight vertical
-    path = `M ${x1} ${y1} L ${x2} ${y2}`
-  } else if (dx >= dy) {
-    // Horizontal dominant: H → V → H
-    const midX = (x1 + x2) / 2
-    path = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
+  // Use fromSide to determine routing axis — keeps arrows pointing in the right direction
+  const horizontal = props.fromSide === 'left' || props.fromSide === 'right'
+
+  if (horizontal) {
+    // H → V → H: exit horizontally, bend vertically, arrive horizontally
+    if (Math.abs(y2 - y1) < 2) {
+      path = `M ${x1} ${y1} L ${x2} ${y2}`
+    } else {
+      const midX = (x1 + x2) / 2
+      path = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
+    }
   } else {
-    // Vertical dominant: V → H → V
-    const midY = (y1 + y2) / 2
-    path = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
+    // V → H → V: exit vertically, bend horizontally, arrive vertically
+    if (Math.abs(x2 - x1) < 2) {
+      path = `M ${x1} ${y1} L ${x2} ${y2}`
+    } else {
+      const midY = (y1 + y2) / 2
+      path = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
+    }
   }
 
   return { path, labelX: (x1 + x2) / 2, labelY: (y1 + y2) / 2 }

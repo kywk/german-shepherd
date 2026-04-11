@@ -68,40 +68,56 @@ interface PortPoint { x: number; y: number }
 
 /**
  * Compute port positions for all connections.
- * Each node+side gets up to 3 ports, evenly distributed along that edge.
+ * Ports on each node+side are sorted by the OTHER node's position
+ * (so the top port connects to the topmost target, etc.)
  */
 const portMap = computed(() => {
   const rects = layout.value.nodeRects
   const conns = props.diagram.connections
 
-  // Step 1: collect which connections use which node+side
-  // key = "nodeName:side", value = list of connection indices
-  const sideUsage = new Map<string, number[]>()
-
+  // Step 1: determine sides for each connection
   const connSides: { fromSide: Side; toSide: Side }[] = []
-
   for (let i = 0; i < conns.length; i++) {
     const c = conns[i]
     const fromR = rects.get(c.from)
     const toR = rects.get(c.to)
-    if (!fromR || !toR) {
-      connSides.push({ fromSide: 'right', toSide: 'left' })
-      continue
-    }
-    const sides = chooseSide(fromR, toR)
-    connSides.push(sides)
+    if (!fromR || !toR) { connSides.push({ fromSide: 'right', toSide: 'left' }); continue }
+    connSides.push(chooseSide(fromR, toR))
+  }
 
-    const fk = `${c.from}:${sides.fromSide}`
-    const tk = `${c.to}:${sides.toSide}`
+  // Step 2: group connections by node+side
+  const sideUsage = new Map<string, number[]>()
+  for (let i = 0; i < conns.length; i++) {
+    const c = conns[i]
+    const { fromSide, toSide } = connSides[i]
+    const fk = `${c.from}:${fromSide}`
+    const tk = `${c.to}:${toSide}`
     if (!sideUsage.has(fk)) sideUsage.set(fk, [])
     sideUsage.get(fk)!.push(i)
     if (!sideUsage.has(tk)) sideUsage.set(tk, [])
     sideUsage.get(tk)!.push(i)
   }
 
-  // Step 2: for each connection, compute the actual port x,y
+  // Step 3: sort each side's connections by the OTHER node's position along the edge axis
+  // For left/right sides: sort by target node center Y
+  // For top/bottom sides: sort by target node center X
+  function otherNodePos(connIdx: number, nodeName: string, side: Side): number {
+    const c = conns[connIdx]
+    const otherName = c.from === nodeName ? c.to : c.from
+    const r = rects.get(otherName)
+    if (!r) return 0
+    return (side === 'left' || side === 'right')
+      ? r.y + r.h / 2   // sort by Y
+      : r.x + r.w / 2   // sort by X
+  }
+
+  for (const [key, list] of sideUsage) {
+    const [nodeName, side] = key.split(':') as [string, Side]
+    list.sort((a, b) => otherNodePos(a, nodeName, side) - otherNodePos(b, nodeName, side))
+  }
+
+  // Step 4: compute port positions
   function portOnSide(rect: NodeRect, side: Side, index: number, total: number): PortPoint {
-    // Distribute ports evenly along the edge
     const t = total === 1 ? 0.5 : (index + 1) / (total + 1)
     switch (side) {
       case 'left':   return { x: rect.x,          y: rect.y + rect.h * t }
@@ -111,29 +127,25 @@ const portMap = computed(() => {
     }
   }
 
-  const result: { from: PortPoint; to: PortPoint }[] = []
+  const result: { from: PortPoint; to: PortPoint; fromSide: Side }[] = []
 
   for (let i = 0; i < conns.length; i++) {
     const c = conns[i]
     const fromR = rects.get(c.from)
     const toR = rects.get(c.to)
     if (!fromR || !toR) {
-      result.push({ from: { x: 0, y: 0 }, to: { x: 0, y: 0 } })
+      result.push({ from: { x: 0, y: 0 }, to: { x: 0, y: 0 }, fromSide: 'right' })
       continue
     }
-
     const { fromSide, toSide } = connSides[i]
-
     const fk = `${c.from}:${fromSide}`
     const tk = `${c.to}:${toSide}`
     const fList = sideUsage.get(fk)!
     const tList = sideUsage.get(tk)!
-    const fIdx = fList.indexOf(i)
-    const tIdx = tList.indexOf(i)
-
     result.push({
-      from: portOnSide(fromR, fromSide, fIdx, fList.length),
-      to: portOnSide(toR, toSide, tIdx, tList.length),
+      from: portOnSide(fromR, fromSide, fList.indexOf(i), fList.length),
+      to:   portOnSide(toR,   toSide,   tList.indexOf(i), tList.length),
+      fromSide,
     })
   }
 
@@ -236,6 +248,7 @@ function nodeSize() {
             :connection="conn"
             :from-port="portMap[i]?.from ?? { x: 0, y: 0 }"
             :to-port="portMap[i]?.to ?? { x: 0, y: 0 }"
+            :from-side="portMap[i]?.fromSide ?? 'right'"
           />
         </g>
 
