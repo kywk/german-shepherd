@@ -11,6 +11,7 @@ const ZONE_HEADER = 28
 const ZONE_GAP = 40
 const MARGIN = 32
 const MAX_PER_COL = 4
+const ROW_GAP = 24
 
 interface LayoutResult {
   nodeRects: Map<string, NodeRect>
@@ -27,13 +28,220 @@ function nodeSize(theme: string) {
 
 function opposite(dir: Dir): Dir { return dir === 'LR' ? 'TD' : 'LR' }
 
+// ============================================================
+// Row-based layout for LR mode
+// ============================================================
+
 /**
- * Layout a node block (consecutive direct nodes).
- *
- * dir = parent zone's direction:
- *   LR parent → nodes stack top-to-bottom, overflow into columns left-to-right
- *   TD parent → nodes stack left-to-right, overflow into rows top-to-bottom
+ * Assign each node a global row so that connected nodes share the same row.
+ * Returns Map<nodeName, rowIndex>.
  */
+function assignRows(diagram: NetworkDiagram): Map<string, number> {
+  const rowOf = new Map<string, number>()
+
+  // Build adjacency: for each node, list of connected nodes
+  const adj = new Map<string, string[]>()
+  for (const n of diagram.nodes) adj.set(n.name, [])
+  for (const c of diagram.connections) {
+    adj.get(c.from)?.push(c.to)
+    adj.get(c.to)?.push(c.from)
+  }
+
+  // Build zone column index: which top-level zone is each node in?
+  const nodeZoneCol = new Map<string, number>()
+  diagram.zones.forEach((z, i) => {
+    function walk(zone: DiagramZone) {
+      for (const child of zone.children) {
+        if (isZone(child)) walk(child)
+        else nodeZoneCol.set((child as DiagramNode).name, i)
+      }
+    }
+    walk(z)
+  })
+
+  // Track which rows are used per zone-column: zoneCol → Set<row>
+  const zoneRowUsage = new Map<number, Set<number>>()
+  for (let i = 0; i < diagram.zones.length; i++) zoneRowUsage.set(i, new Set())
+
+  function claimRow(name: string, row: number) {
+    rowOf.set(name, row)
+    const col = nodeZoneCol.get(name) ?? 0
+    zoneRowUsage.get(col)?.add(row)
+  }
+
+  function isRowFreeInCol(col: number, row: number): boolean {
+    return !(zoneRowUsage.get(col)?.has(row))
+  }
+
+  // Process connections left-to-right (by from-node zone column)
+  // Sort connections by from-node's zone column
+  const sortedConns = [...diagram.connections].sort((a, b) => {
+    return (nodeZoneCol.get(a.from) ?? 0) - (nodeZoneCol.get(b.from) ?? 0)
+  })
+
+  // BFS-like: process each connection, assign rows
+  for (const conn of sortedConns) {
+    const fromCol = nodeZoneCol.get(conn.from) ?? 0
+    const toCol = nodeZoneCol.get(conn.to) ?? 0
+
+    if (rowOf.has(conn.from) && rowOf.has(conn.to)) continue
+
+    if (!rowOf.has(conn.from) && !rowOf.has(conn.to)) {
+      // Neither assigned: find a row free in both columns
+      let row = 0
+      while (!isRowFreeInCol(fromCol, row) || !isRowFreeInCol(toCol, row)) row++
+      claimRow(conn.from, row)
+      claimRow(conn.to, row)
+    } else if (rowOf.has(conn.from)) {
+      // from is assigned, try to put to in same row
+      const row = rowOf.get(conn.from)!
+      if (isRowFreeInCol(toCol, row)) {
+        claimRow(conn.to, row)
+      } else {
+        // Find nearest free row in toCol
+        let r = row
+        let offset = 1
+        while (true) {
+          if (r + offset >= 0 && isRowFreeInCol(toCol, r + offset)) { claimRow(conn.to, r + offset); break }
+          if (r - offset >= 0 && isRowFreeInCol(toCol, r - offset)) { claimRow(conn.to, r - offset); break }
+          offset++
+          if (offset > 20) { claimRow(conn.to, r + offset); break }
+        }
+      }
+    } else {
+      // to is assigned, try to put from in same row
+      const row = rowOf.get(conn.to)!
+      if (isRowFreeInCol(fromCol, row)) {
+        claimRow(conn.from, row)
+      } else {
+        let r = row
+        let offset = 1
+        while (true) {
+          if (r + offset >= 0 && isRowFreeInCol(fromCol, r + offset)) { claimRow(conn.from, r + offset); break }
+          if (r - offset >= 0 && isRowFreeInCol(fromCol, r - offset)) { claimRow(conn.from, r - offset); break }
+          offset++
+          if (offset > 20) { claimRow(conn.from, r + offset); break }
+        }
+      }
+    }
+  }
+
+  // Assign remaining unconnected nodes to next available row in their zone column
+  for (const node of diagram.nodes) {
+    if (rowOf.has(node.name)) continue
+    const col = nodeZoneCol.get(node.name) ?? 0
+    let row = 0
+    while (!isRowFreeInCol(col, row)) row++
+    claimRow(node.name, row)
+  }
+
+  return rowOf
+}
+
+/**
+ * LR layout using global row assignment.
+ * Each zone is a column; nodes are placed at their assigned row Y.
+ */
+function layoutLR(diagram: NetworkDiagram, theme: string): LayoutResult {
+  const { w: NW, h: NH } = nodeSize(theme)
+  const nodeRects = new Map<string, NodeRect>()
+  const zoneRects: ZoneRect[] = []
+
+  const rowOf = assignRows(diagram)
+  const rowHeight = NH + ROW_GAP
+
+  // Compute zone columns: each top-level zone gets an X position
+  // Within a zone, sub-zones and nodes share the same column but may need sub-columns
+  let curX = MARGIN
+
+  for (const zone of diagram.zones) {
+    const { zoneW } = layoutZoneColumnLR(zone, nodeRects, zoneRects, curX, rowOf, rowHeight, NW, NH, theme, zone.name)
+    curX += zoneW + ZONE_GAP
+  }
+
+  // Compute total height from max row
+  let maxRow = 0
+  for (const r of rowOf.values()) if (r > maxRow) maxRow = r
+  const totalH = MARGIN + (maxRow + 1) * rowHeight + MARGIN
+
+  return { nodeRects, zoneRects, totalW: curX + MARGIN, totalH }
+}
+
+/**
+ * Layout a zone as a column in LR mode.
+ * Returns the width consumed.
+ */
+function layoutZoneColumnLR(
+  zone: DiagramZone,
+  nodeRects: Map<string, NodeRect>,
+  zoneRects: ZoneRect[],
+  ox: number,
+  rowOf: Map<string, number>,
+  rowHeight: number,
+  NW: number, NH: number,
+  theme: string,
+  rootName: string
+): { w: number; zoneW: number } {
+  const innerX = ox + ZONE_PAD
+
+  // Collect all sub-zones and direct nodes
+  const subZones: DiagramZone[] = []
+  const directNodes: DiagramNode[] = []
+  for (const child of zone.children) {
+    if (isZone(child)) subZones.push(child)
+    else directNodes.push(child)
+  }
+
+  let curSubX = innerX
+  // Layout sub-zones first (each as a sub-column)
+  for (const sz of subZones) {
+    const { zoneW } = layoutZoneColumnLR(sz, nodeRects, zoneRects, curSubX, rowOf, rowHeight, NW, NH, theme, rootName)
+    curSubX += zoneW + ZONE_GAP
+  }
+
+  // Place direct nodes after sub-zones
+  const nodeX = subZones.length > 0 ? curSubX : innerX
+  for (const node of directNodes) {
+    const row = rowOf.get(node.name) ?? 0
+    const y = MARGIN + row * rowHeight
+    nodeRects.set(node.name, { x: nodeX, y, w: NW, h: NH })
+  }
+
+  const contentRight = directNodes.length > 0 ? nodeX + NW + ZONE_PAD : curSubX
+  const zoneW = Math.max(contentRight - ox, NW + ZONE_PAD * 2)
+
+  // Compute zone rect: Y spans from min row to max row of contained nodes
+  const containedNodes = getAllNodes(zone)
+  let minRow = Infinity, maxRow = -1
+  for (const n of containedNodes) {
+    const r = rowOf.get(n.name) ?? 0
+    if (r < minRow) minRow = r
+    if (r > maxRow) maxRow = r
+  }
+  if (minRow === Infinity) { minRow = 0; maxRow = 0 }
+
+  const zoneY = MARGIN + minRow * rowHeight - ZONE_PAD - ZONE_HEADER
+  const zoneBottom = MARGIN + maxRow * rowHeight + NH + ZONE_PAD
+  const zoneH = zoneBottom - zoneY
+
+  zoneRects.push({ x: ox, y: zoneY, w: zoneW, h: zoneH, depth: zone.depth, name: zone.name, rootName })
+  return { w: zoneW, zoneW }
+}
+
+/** Recursively get all nodes in a zone */
+function getAllNodes(zone: DiagramZone): DiagramNode[] {
+  const result: DiagramNode[] = []
+  for (const child of zone.children) {
+    if (isZone(child)) result.push(...getAllNodes(child))
+    else result.push(child)
+  }
+  return result
+}
+
+// ============================================================
+// Original block-based layout for TD mode
+// ============================================================
+
 function layoutNodeBlock(
   nodes: DiagramNode[],
   nodeRects: Map<string, NodeRect>,
@@ -46,36 +254,29 @@ function layoutNodeBlock(
   const perCol = Math.ceil(n / cols)
 
   if (dir === 'LR') {
-    // nodes top→bottom, columns left→right
-    let totalW = 0
     let totalH = 0
     for (let c = 0; c < cols; c++) {
       const start = c * perCol
       const end = Math.min(start + perCol, n)
       for (let i = start; i < end; i++) {
-        const row = i - start
         nodeRects.set(nodes[i].name, {
           x: ox + c * (NW + NODE_GAP),
-          y: oy + row * (NH + NODE_GAP),
+          y: oy + (i - start) * (NH + NODE_GAP),
           w: NW, h: NH,
         })
       }
       const colH = (end - start) * (NH + NODE_GAP) - NODE_GAP
       if (colH > totalH) totalH = colH
     }
-    totalW = cols * (NW + NODE_GAP) - NODE_GAP
-    return { w: totalW, h: totalH }
+    return { w: cols * (NW + NODE_GAP) - NODE_GAP, h: totalH }
   } else {
-    // nodes left→right, rows top→bottom
     let totalW = 0
-    let totalH = 0
     for (let r = 0; r < cols; r++) {
       const start = r * perCol
       const end = Math.min(start + perCol, n)
       for (let i = start; i < end; i++) {
-        const col = i - start
         nodeRects.set(nodes[i].name, {
-          x: ox + col * (NW + NODE_GAP),
+          x: ox + (i - start) * (NW + NODE_GAP),
           y: oy + r * (NH + NODE_GAP),
           w: NW, h: NH,
         })
@@ -83,20 +284,10 @@ function layoutNodeBlock(
       const rowW = (end - start) * (NW + NODE_GAP) - NODE_GAP
       if (rowW > totalW) totalW = rowW
     }
-    totalH = cols * (NH + NODE_GAP) - NODE_GAP
-    return { w: totalW, h: totalH }
+    return { w: totalW, h: cols * (NH + NODE_GAP) - NODE_GAP }
   }
 }
 
-/**
- * Unified zone layout.
- *
- * dir = this zone's children arrangement direction:
- *   LR → children arranged top-to-bottom (vertical main axis)
- *   TD → children arranged left-to-right (horizontal main axis)
- *
- * Sub-zones use opposite(dir) internally.
- */
 function layoutZone(
   zone: DiagramZone,
   nodeRects: Map<string, NodeRect>,
@@ -107,7 +298,6 @@ function layoutZone(
   const innerX = ox + ZONE_PAD
   const innerY = oy + ZONE_HEADER + ZONE_PAD
 
-  // Walk children in order, grouping consecutive nodes
   type Block = { kind: 'zone'; zone: DiagramZone } | { kind: 'nodes'; nodes: DiagramNode[] }
   const blocks: Block[] = []
   for (const child of zone.children) {
@@ -115,21 +305,16 @@ function layoutZone(
       blocks.push({ kind: 'zone', zone: child })
     } else {
       const last = blocks[blocks.length - 1]
-      if (last?.kind === 'nodes') {
-        last.nodes.push(child)
-      } else {
-        blocks.push({ kind: 'nodes', nodes: [child] })
-      }
+      if (last?.kind === 'nodes') last.nodes.push(child)
+      else blocks.push({ kind: 'nodes', nodes: [child] })
     }
   }
 
-  // Place blocks along main axis
-  let curMain = 0 // offset along main axis from inner origin
-  let maxCross = 0 // max extent along cross axis
+  let curMain = 0
+  let maxCross = 0
 
   for (const block of blocks) {
     if (curMain > 0) curMain += ZONE_GAP
-
     if (block.kind === 'zone') {
       const bx = dir === 'LR' ? innerX : innerX + curMain
       const by = dir === 'LR' ? innerY + curMain : innerY
@@ -146,17 +331,14 @@ function layoutZone(
   }
 
   const { w: NW } = nodeSize(theme)
-  const minContent = NW // at least one node wide/tall
-  const contentMain = Math.max(curMain, minContent)
-  const contentCross = Math.max(maxCross, minContent)
+  const contentMain = Math.max(curMain, NW)
+  const contentCross = Math.max(maxCross, NW)
 
   let totalW: number, totalH: number
   if (dir === 'LR') {
-    // main axis = vertical, cross = horizontal
     totalW = contentCross + ZONE_PAD * 2
     totalH = contentMain + ZONE_HEADER + ZONE_PAD * 2
   } else {
-    // main axis = horizontal, cross = vertical
     totalW = contentMain + ZONE_PAD * 2
     totalH = contentCross + ZONE_HEADER + ZONE_PAD * 2
   }
@@ -164,6 +346,10 @@ function layoutZone(
   zoneRects.push({ x: ox, y: oy, w: totalW, h: totalH, depth: zone.depth, name: zone.name, rootName })
   return { w: totalW, h: totalH }
 }
+
+// ============================================================
+// Entry point
+// ============================================================
 
 export function useLayout(
   diagram: () => NetworkDiagram,
@@ -174,21 +360,13 @@ export function useLayout(
     const d = diagram()
     const t = theme()
     const dir = display()
-    const nodeRects = new Map<string, NodeRect>()
-    const zoneRects: ZoneRect[] = []
 
     if (dir === 'LR') {
-      // Top-level zones: left → right
-      let curX = MARGIN
-      let maxH = 0
-      for (const zone of d.zones) {
-        const { w, h } = layoutZone(zone, nodeRects, zoneRects, curX, MARGIN, dir, t, zone.name)
-        curX += w + ZONE_GAP
-        if (h > maxH) maxH = h
-      }
-      return { nodeRects, zoneRects, totalW: curX + MARGIN, totalH: maxH + MARGIN * 2 }
+      return layoutLR(d, t)
     } else {
-      // Top-level zones: top → bottom
+      // TD mode: use original block-based layout
+      const nodeRects = new Map<string, NodeRect>()
+      const zoneRects: ZoneRect[] = []
       let curY = MARGIN
       let maxW = 0
       for (const zone of d.zones) {
