@@ -25,9 +25,9 @@
   --lint-info: var(--color-accent);
 
   /* Diff (預留) */
-  --diff-added: hsl(150, 70%, 45%);
-  --diff-removed: hsl(0, 70%, 55%);
-  --diff-modified: hsl(45, 80%, 55%);
+  --diff-added: hsl(140, 85%, 55%);
+  --diff-removed: hsl(0, 85%, 60%);
+  --diff-modified: hsl(45, 95%, 60%);
 }
 
 [data-theme="light"] {

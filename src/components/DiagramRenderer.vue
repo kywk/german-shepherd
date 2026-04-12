@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import type { NetworkDiagram, LintDiagnostic } from '@/types/index'
+import type { NetworkDiagram, LintDiagnostic, DiffState } from '@/types/index'
 import { useLayout, type NodeRect } from '@/composables/useLayout'
 import NodeRenderer from './NodeRenderer.vue'
 import ConnectionRenderer from './ConnectionRenderer.vue'
@@ -12,6 +12,7 @@ const props = defineProps<{
   display: 'LR' | 'TD'
   showTags: boolean
   lintDiagnostics?: LintDiagnostic[]
+  nodeDiffMap?: Map<string, DiffState>
 }>()
 
 // Pan/zoom
@@ -266,6 +267,7 @@ function nodeSize() {
             :theme="theme"
             :show-tags="showTags"
             :is-lint-warning="lintWarnNodes.has(node.name)"
+            :diff-state="nodeDiffMap?.get(node.name)"
           />
         </g>
       </g>

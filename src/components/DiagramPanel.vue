@@ -21,6 +21,12 @@ const toggleTheme = useToggle(isDark)
 const display = computed(() => displayOverride.value ?? diagramStore.parsedDiagram.meta.display)
 const theme = computed(() => themeOverride.value ?? diagramStore.parsedDiagram.meta.theme)
 const title = computed(() => diagramStore.parsedDiagram.meta.title || 'German Shepherd')
+
+const activeDiagram = computed(() =>
+  diagramStore.diffMode && diagramStore.diffResult
+    ? diagramStore.diffResult.mergedDiagram
+    : diagramStore.parsedDiagram
+)
 </script>
 
 <template>
@@ -86,11 +92,12 @@ const title = computed(() => diagramStore.parsedDiagram.meta.title || 'German Sh
 
     <div class="panel-content">
       <DiagramRenderer
-        :diagram="diagramStore.parsedDiagram"
+        :diagram="activeDiagram"
         :theme="theme"
         :display="display"
         :show-tags="diagramStore.showTags"
         :lint-diagnostics="diagramStore.filteredDiagnostics"
+        :node-diff-map="diagramStore.diffResult?.nodeDiffMap"
       />
     </div>
   </div>
