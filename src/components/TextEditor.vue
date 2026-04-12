@@ -129,13 +129,11 @@ const lintMessages = computed(() => {
 }
 
 .line-number {
-  height: calc(1.8em);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  line-height: calc(13px * 1.8);
+  text-align: right;
   padding-right: 8px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: default;
 }
 
