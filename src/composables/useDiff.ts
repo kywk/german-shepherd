@@ -110,7 +110,7 @@ function rebuildZoneChildren(zones: DiagramZone[], nodes: DiagramNode[]) {
 }
 
 /** Merge two DSL texts into one, lower takes precedence for conflicts */
-export function mergeDiagramText(upperText: string, lowerText: string, upper: NetworkDiagram, lower: NetworkDiagram): string {
+export function mergeDiagramText(_upperText: string, _lowerText: string, upper: NetworkDiagram, lower: NetworkDiagram): string {
   const { mergedDiagram } = computeDiff(upper, lower)
   return serializeDiagram(mergedDiagram)
 }
