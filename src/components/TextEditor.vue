@@ -3,26 +3,38 @@ import { ref, computed, watch } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useDiagramStore } from '@/stores/diagramStore'
 
+const props = defineProps<{ modelValue?: string }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+
 const workspaceStore = useWorkspaceStore()
 const diagramStore = useDiagramStore()
 
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const gutterRef = ref<HTMLElement | null>(null)
 
-const localText = ref(workspaceStore.currentRawText)
+const isControlled = computed(() => props.modelValue !== undefined)
+const localText = ref(isControlled.value ? props.modelValue! : workspaceStore.currentRawText)
 
-// Sync when workspace switches
+// Sync from external source
+watch(() => props.modelValue, (val) => {
+  if (val !== undefined && val !== localText.value) localText.value = val
+})
 watch(() => workspaceStore.currentRawText, (val) => {
-  if (val !== localText.value) localText.value = val
+  if (!isControlled.value && val !== localText.value) localText.value = val
 })
 
+function setText(val: string) {
+  localText.value = val
+  if (isControlled.value) emit('update:modelValue', val)
+  else workspaceStore.updateCurrentRawText(val)
+}
+
 function onInput(e: Event) {
-  localText.value = (e.target as HTMLTextAreaElement).value
-  workspaceStore.updateCurrentRawText(localText.value)
+  setText((e.target as HTMLTextAreaElement).value)
 }
 
 function onBlur() {
-  workspaceStore.updateCurrentRawText(localText.value)
+  if (!isControlled.value) workspaceStore.updateCurrentRawText(localText.value)
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -36,7 +48,7 @@ function onKeydown(e: KeyboardEvent) {
     requestAnimationFrame(() => {
       ta.selectionStart = ta.selectionEnd = start + 2
     })
-    workspaceStore.updateCurrentRawText(localText.value)
+    setText(localText.value)
   }
 }
 
@@ -117,13 +129,11 @@ const lintMessages = computed(() => {
 }
 
 .line-number {
-  height: calc(1.8em);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  line-height: calc(13px * 1.8);
+  text-align: right;
   padding-right: 8px;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: 13px;
   cursor: default;
 }
 

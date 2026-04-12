@@ -50,11 +50,11 @@ function getIconChar(node: DiagramNode): string {
       :width="w"
       :height="h"
       rx="6"
-      :fill="colorVar"
-      fill-opacity="0.18"
-      :stroke="isLintWarning ? 'var(--lint-error)' : colorVar"
-      :stroke-width="isLintWarning ? 2 : 1"
-      :stroke-dasharray="isLintWarning ? '4 3' : 'none'"
+      :fill="diffState && diffState !== 'unchanged' ? `var(--diff-${diffState})` : colorVar"
+      :fill-opacity="diffState && diffState !== 'unchanged' ? 0.35 : 0.18"
+      :stroke="isLintWarning ? 'var(--lint-error)' : (diffState && diffState !== 'unchanged' ? `var(--diff-${diffState})` : colorVar)"
+      :stroke-width="diffState && diffState !== 'unchanged' ? 3 : (isLintWarning ? 2 : 1)"
+      :stroke-dasharray="isLintWarning ? '4 3' : (diffState === 'removed' ? '6 3' : 'none')"
     />
 
     <!-- icon theme: icon + name below -->

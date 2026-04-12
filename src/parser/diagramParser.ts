@@ -56,7 +56,7 @@ function parseConnection(line: string, lineNum: number): DiagramConnection | nul
   }
 }
 
-export function parseBody(bodyText: string): ParseResult {
+export function parseBody(bodyText: string, lineOffset = 0): ParseResult {
   const lines = bodyText.split('\n')
   const zones: DiagramZone[] = []
   const connections: DiagramConnection[] = []
@@ -68,7 +68,7 @@ export function parseBody(bodyText: string): ParseResult {
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i]
-    const lineNum = i + 1
+    const lineNum = i + 1 + lineOffset
     if (raw.trim() === '') continue
 
     // detect connection lines
