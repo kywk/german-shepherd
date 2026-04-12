@@ -9,7 +9,7 @@ const NODE_GAP = 32
 const ZONE_PAD = 24
 const ZONE_HEADER = 28
 const ZONE_GAP = 40
-const MARGIN = 32
+const MARGIN = 64
 const MAX_PER_COL = 4
 const ROW_GAP = 24
 
