@@ -220,7 +220,10 @@ function layoutZoneColumnLR(
   }
   if (minRow === Infinity) { minRow = 0; maxRow = 0 }
 
-  const zoneY = MARGIN + minRow * rowHeight - ZONE_PAD - ZONE_HEADER
+  // Count how many sub-zone nesting levels are inside this zone
+  const maxChildDepth = getMaxDepth(zone) - zone.depth
+  const headerStack = maxChildDepth * (ZONE_HEADER + 6)
+  const zoneY = MARGIN + minRow * rowHeight - ZONE_PAD - ZONE_HEADER - headerStack
   const zoneBottom = MARGIN + maxRow * rowHeight + NH + ZONE_PAD
   const zoneH = zoneBottom - zoneY
 
@@ -236,6 +239,18 @@ function getAllNodes(zone: DiagramZone): DiagramNode[] {
     else result.push(child)
   }
   return result
+}
+
+/** Get the maximum depth among this zone and all its descendants */
+function getMaxDepth(zone: DiagramZone): number {
+  let max = zone.depth
+  for (const child of zone.children) {
+    if (isZone(child)) {
+      const d = getMaxDepth(child)
+      if (d > max) max = d
+    }
+  }
+  return max
 }
 
 // ============================================================
