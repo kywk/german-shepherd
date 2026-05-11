@@ -1,4 +1,4 @@
-import type { NetworkDiagram, LintDiagnostic } from '@/types/index'
+import type { NetworkDiagram, LintDiagnostic, DiagramZone, DiagramNode } from '@/types/index'
 import { NODE_TYPES, CONNECTION_PROTOCOLS } from '@/types/index'
 
 export function lint(diagram: NetworkDiagram): LintDiagnostic[] {
@@ -35,14 +35,15 @@ export function lint(diagram: NetworkDiagram): LintDiagnostic[] {
   checkDepth(diagram.zones)
 
   const nodeNames = new Set(nodes.map(n => n.name))
+  const { zoneNames } = diagram
 
-  // undefined-node-ref
+  // undefined-node-ref: allow zone names as group-level connection endpoints
   for (const conn of connections) {
-    if (!nodeNames.has(conn.from)) {
-      diags.push({ line: conn.line, column: 1, message: `連線引用不存在的節點: "${conn.from}"`, severity: 'error', rule: 'undefined-node-ref' })
+    if (!nodeNames.has(conn.from) && !zoneNames.has(conn.from)) {
+      diags.push({ line: conn.line, column: 1, message: `連線引用不存在的節點或區段: "${conn.from}"`, severity: 'error', rule: 'undefined-node-ref' })
     }
-    if (!nodeNames.has(conn.to)) {
-      diags.push({ line: conn.line, column: 1, message: `連線引用不存在的節點: "${conn.to}"`, severity: 'error', rule: 'undefined-node-ref' })
+    if (!nodeNames.has(conn.to) && !zoneNames.has(conn.to)) {
+      diags.push({ line: conn.line, column: 1, message: `連線引用不存在的節點或區段: "${conn.to}"`, severity: 'error', rule: 'undefined-node-ref' })
     }
   }
 
@@ -53,11 +54,43 @@ export function lint(diagram: NetworkDiagram): LintDiagnostic[] {
     }
   }
 
-  // isolated-node
+  // isolated-node: also mark as connected all nodes inside a zone referenced in connections
   const connected = new Set<string>()
+  // Collect all nodes inside a given zone name
+  function nodesInZone(zoneName: string): string[] {
+    function findZone(zoneList: NetworkDiagram['zones']): DiagramZone | null {
+      for (const z of zoneList) {
+        if (z.name === zoneName) return z
+        const sub = z.children.filter(c => 'children' in c) as NetworkDiagram['zones']
+        const found = findZone(sub)
+        if (found) return found
+      }
+      return null
+    }
+    const zone = findZone(diagram.zones)
+    if (!zone) return []
+    return getAllNodes(zone).map(n => n.name)
+  }
+  function getAllNodes(zone: DiagramZone): DiagramNode[] {
+    const result: DiagramNode[] = []
+    for (const child of zone.children) {
+      if ('children' in child) result.push(...getAllNodes(child as DiagramZone))
+      else result.push(child as DiagramNode)
+    }
+    return result
+  }
   for (const conn of connections) {
-    connected.add(conn.from)
-    connected.add(conn.to)
+    // If endpoint is a zone name, mark all its nodes as connected
+    if (zoneNames.has(conn.from)) {
+      nodesInZone(conn.from).forEach(n => connected.add(n))
+    } else {
+      connected.add(conn.from)
+    }
+    if (zoneNames.has(conn.to)) {
+      nodesInZone(conn.to).forEach(n => connected.add(n))
+    } else {
+      connected.add(conn.to)
+    }
   }
   for (const node of nodes) {
     if (!connected.has(node.name)) {

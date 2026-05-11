@@ -74,14 +74,23 @@ interface PortPoint { x: number; y: number }
  */
 const portMap = computed(() => {
   const rects = layout.value.nodeRects
+
+  // Build combined rect map: nodes + sub-zones (depth > 0) as connection endpoints
+  const allRects = new Map<string, NodeRect>(rects)
+  for (const zr of layout.value.zoneRects) {
+    if (zr.depth > 0 && !allRects.has(zr.name)) {
+      allRects.set(zr.name, { x: zr.x, y: zr.y, w: zr.w, h: zr.h })
+    }
+  }
+
   const conns = props.diagram.connections
 
   // Step 1: determine sides for each connection
   const connSides: { fromSide: Side; toSide: Side }[] = []
   for (let i = 0; i < conns.length; i++) {
     const c = conns[i]
-    const fromR = rects.get(c.from)
-    const toR = rects.get(c.to)
+    const fromR = allRects.get(c.from)
+    const toR = allRects.get(c.to)
     if (!fromR || !toR) { connSides.push({ fromSide: 'right', toSide: 'left' }); continue }
     connSides.push(chooseSide(fromR, toR))
   }
@@ -105,11 +114,11 @@ const portMap = computed(() => {
   function otherNodePos(connIdx: number, nodeName: string, side: Side): number {
     const c = conns[connIdx]
     const otherName = c.from === nodeName ? c.to : c.from
-    const r = rects.get(otherName)
+    const r = allRects.get(otherName)
     if (!r) return 0
     return (side === 'left' || side === 'right')
-      ? r.y + r.h / 2   // sort by Y
-      : r.x + r.w / 2   // sort by X
+      ? r.y + r.h / 2
+      : r.x + r.w / 2
   }
 
   for (const [key, list] of sideUsage) {
@@ -132,8 +141,8 @@ const portMap = computed(() => {
 
   for (let i = 0; i < conns.length; i++) {
     const c = conns[i]
-    const fromR = rects.get(c.from)
-    const toR = rects.get(c.to)
+    const fromR = allRects.get(c.from)
+    const toR = allRects.get(c.to)
     if (!fromR || !toR) {
       result.push({ from: { x: 0, y: 0 }, to: { x: 0, y: 0 }, fromSide: 'right' })
       continue

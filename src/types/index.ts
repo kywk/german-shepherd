@@ -68,6 +68,7 @@ export interface NetworkDiagram {
   zones: DiagramZone[]
   connections: DiagramConnection[]
   nodes: DiagramNode[] // flat list
+  zoneNames: Set<string> // flat set of all zone names (for group-level connections)
 }
 
 // ===== Lint =====

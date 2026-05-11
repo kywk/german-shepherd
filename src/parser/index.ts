@@ -17,7 +17,19 @@ export function parseNetworkDiagram(rawText: string): { diagram: NetworkDiagram,
 
   const meta = parseMeta(headerText)
   const { zones, connections, nodes } = parseBody(bodyText, bodyLineOffset)
-  const diagram: NetworkDiagram = { meta, zones, connections, nodes }
+
+  // Build flat set of all zone names (including sub-zones) for group-level connection support
+  function collectZoneNames(zoneList: typeof zones, acc: Set<string>) {
+    for (const z of zoneList) {
+      acc.add(z.name)
+      const sub = z.children.filter(c => 'children' in c) as typeof zones
+      collectZoneNames(sub, acc)
+    }
+  }
+  const zoneNames = new Set<string>()
+  collectZoneNames(zones, zoneNames)
+
+  const diagram: NetworkDiagram = { meta, zones, connections, nodes, zoneNames }
   const diagnostics = lint(diagram)
 
   return { diagram, diagnostics }
