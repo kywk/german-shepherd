@@ -61,9 +61,11 @@ function getMaxDepth(zone: DiagramZone): number {
 function assignRows(diagram: NetworkDiagram): Map<string, number> {
   const rowOf = new Map<string, number>()
 
+  // Map both node names AND zone names to their top-level zone column index
   const nodeZoneCol = new Map<string, number>()
   diagram.zones.forEach((z, i) => {
     function walk(zone: DiagramZone) {
+      nodeZoneCol.set(zone.name, i) // zone name → column
       for (const child of zone.children) {
         if (isZone(child)) walk(child)
         else nodeZoneCol.set((child as DiagramNode).name, i)
@@ -71,6 +73,33 @@ function assignRows(diagram: NetworkDiagram): Map<string, number> {
     }
     walk(z)
   })
+
+  // For group connections (zone name as endpoint), resolve to first node in that zone
+  const nodeNameSet = new Set(diagram.nodes.map(n => n.name))
+  function resolveEndpoint(name: string): string {
+    if (nodeNameSet.has(name)) return name
+    // Find first node in the named zone
+    function findFirst(zones: DiagramZone[]): string | null {
+      for (const z of zones) {
+        if (z.name === name) {
+          const nodes = getAllNodes(z)
+          return nodes[0]?.name ?? null
+        }
+        const sub = z.children.filter(isZone) as DiagramZone[]
+        const found = findFirst(sub)
+        if (found) return found
+      }
+      return null
+    }
+    return findFirst(diagram.zones) ?? name
+  }
+
+  // Expand group connections to node-level for row assignment
+  const effectiveConns = diagram.connections.map(c => ({
+    ...c,
+    from: resolveEndpoint(c.from),
+    to: resolveEndpoint(c.to),
+  }))
 
   const zoneRowUsage = new Map<number, Set<number>>()
   for (let i = 0; i < diagram.zones.length; i++) zoneRowUsage.set(i, new Set())
@@ -85,7 +114,7 @@ function assignRows(diagram: NetworkDiagram): Map<string, number> {
     return !(zoneRowUsage.get(col)?.has(row))
   }
 
-  const sortedConns = [...diagram.connections].sort((a, b) =>
+  const sortedConns = [...effectiveConns].sort((a, b) =>
     (nodeZoneCol.get(a.from) ?? 0) - (nodeZoneCol.get(b.from) ?? 0)
   )
 
@@ -379,7 +408,7 @@ function layoutZoneColumnLR(
 
   // If direct nodes >= 3 and no sub-zones, try 2-col arrangement
   let directCols = 1
-  if (subZones.length === 0 && directNodes.length >= 3) {
+  if (subZones.length === 0 && directNodes.length >= 5) {
     const { cols } = detectSubZoneLayout(directNodes, allConnections)
     directCols = cols
   }
