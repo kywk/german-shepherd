@@ -87,11 +87,21 @@ function assignRows(diagram: NetworkDiagram): Map<string, number> {
     if (rowOf.has(conn.from) && rowOf.has(conn.to)) continue
 
     if (!rowOf.has(conn.from) && !rowOf.has(conn.to)) {
-      // Neither assigned: find a row free in both columns
-      let row = 0
-      while (!isRowFreeInCol(fromCol, row) || !isRowFreeInCol(toCol, row)) row++
-      claimRow(conn.from, row)
-      claimRow(conn.to, row)
+      if (fromCol === toCol) {
+        // Same zone: nodes must occupy different rows
+        let row = 0
+        while (!isRowFreeInCol(fromCol, row)) row++
+        claimRow(conn.from, row)
+        row++
+        while (!isRowFreeInCol(toCol, row)) row++
+        claimRow(conn.to, row)
+      } else {
+        // Different zones: find a row free in both columns
+        let row = 0
+        while (!isRowFreeInCol(fromCol, row) || !isRowFreeInCol(toCol, row)) row++
+        claimRow(conn.from, row)
+        claimRow(conn.to, row)
+      }
     } else if (rowOf.has(conn.from)) {
       // from is assigned, try to put to in same row
       const row = rowOf.get(conn.from)!
@@ -163,6 +173,15 @@ function layoutLR(diagram: NetworkDiagram, theme: string): LayoutResult {
   let maxRow = 0
   for (const r of rowOf.values()) if (r > maxRow) maxRow = r
   const totalH = MARGIN + (maxRow + 1) * rowHeight + MARGIN
+
+  // Expand top-level zone rects to full diagram height (for dashed separator rendering)
+  const topY = MARGIN / 2
+  for (const zr of zoneRects) {
+    if (zr.depth === 0) {
+      zr.y = topY
+      zr.h = totalH - topY
+    }
+  }
 
   return { nodeRects, zoneRects, totalW: curX + MARGIN, totalH }
 }

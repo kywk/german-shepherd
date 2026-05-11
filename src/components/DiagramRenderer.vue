@@ -212,32 +212,56 @@ function nodeSize() {
         <!-- Zones -->
         <g class="zones">
           <g v-for="zr in layout.zoneRects" :key="zr.name + zr.x + zr.y">
-            <rect
-              :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h"
-              rx="8"
-              :fill="zoneColor(zr.rootName)"
-              :fill-opacity="0.12 - zr.depth * 0.02"
-              :stroke="zoneColor(zr.rootName)"
-              stroke-opacity="0.4"
-              stroke-width="1"
-            />
-            <rect
-              :x="zr.x" :y="zr.y" :width="zr.w" height="24"
-              rx="8"
-              :fill="zoneColor(zr.rootName)"
-              :fill-opacity="0.35 - zr.depth * 0.05"
-            />
-            <rect
-              :x="zr.x" :y="zr.y + 16" :width="zr.w" height="8"
-              :fill="zoneColor(zr.rootName)"
-              :fill-opacity="0.35 - zr.depth * 0.05"
-            />
-            <text
-              :x="zr.x + 10" :y="zr.y + 14"
-              dominant-baseline="middle"
-              font-size="11" font-weight="600"
-              fill="var(--color-text-primary)"
-            >{{ zr.name }}</text>
+            <!-- Top-level zone (depth=0): dashed vertical divider + label -->
+            <template v-if="zr.depth === 0">
+              <!-- Left dashed separator line -->
+              <line
+                :x1="zr.x" :y1="zr.y"
+                :x2="zr.x" :y2="zr.y + zr.h"
+                stroke="var(--color-text-muted)"
+                stroke-width="1.5"
+                stroke-dasharray="6,4"
+                stroke-opacity="0.55"
+              />
+              <!-- Zone label at top center of the zone column -->
+              <text
+                :x="zr.x + zr.w / 2" :y="zr.y + 20"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                font-size="13" font-weight="700"
+                fill="var(--color-text-primary)"
+              >{{ zr.name }}</text>
+            </template>
+
+            <!-- Sub-zone (depth>0): filled rectangle with header -->
+            <template v-else>
+              <rect
+                :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h"
+                rx="8"
+                :fill="zoneColor(zr.rootName)"
+                :fill-opacity="0.12 - zr.depth * 0.02"
+                :stroke="zoneColor(zr.rootName)"
+                stroke-opacity="0.4"
+                stroke-width="1"
+              />
+              <rect
+                :x="zr.x" :y="zr.y" :width="zr.w" height="24"
+                rx="8"
+                :fill="zoneColor(zr.rootName)"
+                :fill-opacity="0.35 - zr.depth * 0.05"
+              />
+              <rect
+                :x="zr.x" :y="zr.y + 16" :width="zr.w" height="8"
+                :fill="zoneColor(zr.rootName)"
+                :fill-opacity="0.35 - zr.depth * 0.05"
+              />
+              <text
+                :x="zr.x + 10" :y="zr.y + 14"
+                dominant-baseline="middle"
+                font-size="11" font-weight="600"
+                fill="var(--color-text-primary)"
+              >{{ zr.name }}</text>
+            </template>
           </g>
         </g>
 
