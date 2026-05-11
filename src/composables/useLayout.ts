@@ -114,9 +114,15 @@ function assignRows(diagram: NetworkDiagram): Map<string, number> {
     return !(zoneRowUsage.get(col)?.has(row))
   }
 
-  const sortedConns = [...effectiveConns].sort((a, b) =>
-    (nodeZoneCol.get(a.from) ?? 0) - (nodeZoneCol.get(b.from) ?? 0)
-  )
+  // Sort by zone-span distance ascending (adjacent connections first),
+  // then by leftmost column — prevents long-range connections from pre-empting rows
+  const sortedConns = [...effectiveConns].sort((a, b) => {
+    const distA = Math.abs((nodeZoneCol.get(a.to) ?? 0) - (nodeZoneCol.get(a.from) ?? 0))
+    const distB = Math.abs((nodeZoneCol.get(b.to) ?? 0) - (nodeZoneCol.get(b.from) ?? 0))
+    if (distA !== distB) return distA - distB
+    return Math.min(nodeZoneCol.get(a.from) ?? 0, nodeZoneCol.get(a.to) ?? 0)
+         - Math.min(nodeZoneCol.get(b.from) ?? 0, nodeZoneCol.get(b.to) ?? 0)
+  })
 
   for (const conn of sortedConns) {
     const fromCol = nodeZoneCol.get(conn.from) ?? 0
@@ -218,19 +224,24 @@ function compactSubZones(diagram: NetworkDiagram, rowOf: Map<string, number>): v
     const sortedSub = subNodes.slice().sort((a, b) => (rowOf.get(a.name) ?? 0) - (rowOf.get(b.name) ?? 0))
     const needed = sortedSub.length
 
-    // Find a starting row where all needed rows are free from other nodes
-    let startRow = currentRows[0]
-    for (let attempt = 0; attempt < 100; attempt++) {
-      let conflict = false
-      for (let k = 0; k < needed; k++) {
-        if (otherRowsSet.has(startRow + k)) { conflict = true; break }
+    // Search bidirectionally from anchor (min current row) to find closest conflict-free position
+    const anchor = currentRows[0]
+    let bestStart = anchor
+    let found = false
+    for (let offset = 0; offset <= 100 && !found; offset++) {
+      // Try moving up first (toward smaller row numbers)
+      for (const candidate of offset === 0 ? [anchor] : [anchor - offset, anchor + offset]) {
+        if (candidate < 0) continue
+        let conflict = false
+        for (let k = 0; k < needed; k++) {
+          if (otherRowsSet.has(candidate + k)) { conflict = true; break }
+        }
+        if (!conflict) { bestStart = candidate; found = true; break }
       }
-      if (!conflict) break
-      startRow++
     }
 
     // Assign consecutive rows
-    sortedSub.forEach((n, i) => rowOf.set(n.name, startRow + i))
+    sortedSub.forEach((n, i) => rowOf.set(n.name, bestStart + i))
   }
 
   for (let zoneIdx = 0; zoneIdx < diagram.zones.length; zoneIdx++) {
