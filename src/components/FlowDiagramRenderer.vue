@@ -293,11 +293,12 @@ function onPaneDblClick(event: MouseEvent) {
 const zoneRects = computed(() => {
   if (!props.isManualMode) return layout.value.zoneRects
 
-  const PAD = 18
-  const HEADER = 26
+  const PAD = 30
+  const HEADER = 30
   const rects: typeof layout.value.zoneRects = []
   const nodeRects = new Map<string, { x: number; y: number; w: number; h: number }>()
-  const { w: NW, h: NH } = props.theme === 'simple' ? { w: 140, h: 64 } : { w: 100, h: 90 }
+  // Node rendered width is wider than the fixed size due to padding/text
+  const { w: NW, h: NH } = props.theme === 'simple' ? { w: 160, h: 70 } : { w: 120, h: 95 }
   const ld = canvasStore.layoutData
 
   for (const node of props.diagram.nodes) {
