@@ -5,19 +5,21 @@ import { isZone } from '@/types/index'
 export interface NodeRect { x: number; y: number; w: number; h: number }
 export interface ZoneRect { x: number; y: number; w: number; h: number; depth: number; name: string; rootName: string }
 
-const NODE_GAP = 32
-const ZONE_PAD = 24
-const ZONE_HEADER = 28
-const ZONE_GAP = 40
-const MARGIN = 64
+const NODE_GAP = 20
+const ZONE_PAD = 18
+const ZONE_HEADER = 26
+const ZONE_GAP = 28
+const MARGIN = 44
 const MAX_PER_COL = 4
-const ROW_GAP = 24
+const ROW_GAP = 16
 
 interface LayoutResult {
   nodeRects: Map<string, NodeRect>
   zoneRects: ZoneRect[]
   totalW: number
   totalH: number
+  /** nodeName → top-level zone name (for zone-aware port selection) */
+  nodeZoneMap: Map<string, string>
 }
 
 type Dir = 'LR' | 'TD'
@@ -311,6 +313,81 @@ function detectSubZoneLayout(
 /**
  * LR layout using global row assignment + sub-zone compaction.
  */
+/** Build nodeName → top-level zone name map */
+function buildNodeZoneMap(diagram: NetworkDiagram): Map<string, string> {
+  const map = new Map<string, string>()
+  for (const zone of diagram.zones) {
+    function walk(z: DiagramZone, root: string) {
+      for (const child of z.children) {
+        if (isZone(child)) walk(child, root)
+        else map.set((child as DiagramNode).name, root)
+      }
+    }
+    walk(zone, zone.name)
+  }
+  return map
+}
+
+/**
+ * After global row assignment, for each top-level zone column compact
+ * nodes that have NO cross-zone connections by shifting them up to fill
+ * empty row slots, preserving relative order of all nodes in the column.
+ */
+function compactZoneColumns(diagram: NetworkDiagram, rowOf: Map<string, number>): void {
+  // Build cross-zone connection set
+  const nodeZoneCol = new Map<string, number>()
+  diagram.zones.forEach((z, i) => {
+    function walk(zone: DiagramZone) {
+      for (const child of zone.children) {
+        if (isZone(child)) walk(child)
+        else nodeZoneCol.set((child as DiagramNode).name, i)
+      }
+    }
+    walk(z)
+  })
+
+  const hasCrossConn = new Set<string>()
+  for (const c of diagram.connections) {
+    const fc = nodeZoneCol.get(c.from)
+    const tc = nodeZoneCol.get(c.to)
+    if (fc !== undefined && tc !== undefined && fc !== tc) {
+      hasCrossConn.add(c.from)
+      hasCrossConn.add(c.to)
+    }
+  }
+
+  // For each zone column, compact free nodes
+  for (let zoneIdx = 0; zoneIdx < diagram.zones.length; zoneIdx++) {
+    const zoneNodes = diagram.nodes.filter(n => nodeZoneCol.get(n.name) === zoneIdx)
+    if (zoneNodes.length === 0) continue
+
+    // Anchored = has cross-zone connections, Free = internal only
+    const anchored = zoneNodes.filter(n => hasCrossConn.has(n.name))
+    const free = zoneNodes.filter(n => !hasCrossConn.has(n.name))
+    if (free.length === 0) continue
+
+    // Collect used rows from anchored nodes
+    const anchoredRows = new Set(anchored.map(n => rowOf.get(n.name) ?? 0))
+
+    // Find empty rows before the first anchored row (or between anchored rows)
+    const sortedAnchoredRows = [...anchoredRows].sort((a, b) => a - b)
+    const minAnchoredRow = sortedAnchoredRows[0] ?? 0
+    const maxAnchoredRow = sortedAnchoredRows[sortedAnchoredRows.length - 1] ?? 0
+
+    // Sort free nodes by current row
+    const sortedFree = free.slice().sort((a, b) => (rowOf.get(a.name) ?? 0) - (rowOf.get(b.name) ?? 0))
+
+    // Try to fit free nodes in empty slots 0..maxAnchoredRow, else place after
+    let slot = 0
+    for (const n of sortedFree) {
+      while (anchoredRows.has(slot) || slot > maxAnchoredRow + free.length) slot++
+      rowOf.set(n.name, slot)
+      anchoredRows.add(slot) // treat as occupied now
+      slot++
+    }
+  }
+}
+
 function layoutLR(diagram: NetworkDiagram, theme: string): LayoutResult {
   const { w: NW, h: NH } = nodeSize(theme)
   const nodeRects = new Map<string, NodeRect>()
@@ -318,6 +395,9 @@ function layoutLR(diagram: NetworkDiagram, theme: string): LayoutResult {
 
   const rowOf = assignRows(diagram)
   compactSubZones(diagram, rowOf)
+  compactZoneColumns(diagram, rowOf)
+
+  const nodeZoneMap = buildNodeZoneMap(diagram)
 
   const rowHeight = NH + ROW_GAP
 
@@ -340,7 +420,7 @@ function layoutLR(diagram: NetworkDiagram, theme: string): LayoutResult {
     }
   }
 
-  return { nodeRects, zoneRects, totalW: curX + MARGIN, totalH }
+  return { nodeRects, zoneRects, totalW: curX + MARGIN, totalH, nodeZoneMap }
 }
 
 /**
@@ -597,6 +677,7 @@ export function useLayout(
     } else {
       const nodeRects = new Map<string, NodeRect>()
       const zoneRects: ZoneRect[] = []
+      const nodeZoneMap = buildNodeZoneMap(d)
       let curY = MARGIN
       let maxW = 0
       for (const zone of d.zones) {
@@ -604,7 +685,7 @@ export function useLayout(
         curY += h + ZONE_GAP
         if (w > maxW) maxW = w
       }
-      return { nodeRects, zoneRects, totalW: maxW + MARGIN * 2, totalH: curY + MARGIN }
+      return { nodeRects, zoneRects, totalW: maxW + MARGIN * 2, totalH: curY + MARGIN, nodeZoneMap }
     }
   })
 }

@@ -46,23 +46,57 @@ const layout = useLayout(() => props.diagram, () => props.display, () => props.t
 // ---- Port assignment ----
 type Side = 'top' | 'bottom' | 'left' | 'right'
 
-function chooseSide(from: NodeRect, to: NodeRect): { fromSide: Side; toSide: Side } {
-  const fcx = from.x + from.w / 2
-  const fcy = from.y + from.h / 2
-  const tcx = to.x + to.w / 2
-  const tcy = to.y + to.h / 2
-  const dx = tcx - fcx
-  const dy = tcy - fcy
+/** Maps nodeName → top-level zone name, used for zone-aware port selection */
+const nodeTopZoneMap = computed(() => layout.value.nodeZoneMap)
 
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx >= 0
-      ? { fromSide: 'right', toSide: 'left' }
-      : { fromSide: 'left', toSide: 'right' }
-  } else {
+/**
+ * Zone-aware port selection:
+ * - Same top-level zone → strongly prefer vertical ports (bottom/top)
+ * - Cross-zone → prefer horizontal (right/left), with slightly relaxed threshold
+ */
+function chooseSide(
+  from: NodeRect, to: NodeRect,
+  fromName?: string, toName?: string
+): { fromSide: Side; toSide: Side } {
+  const dx = (to.x + to.w / 2) - (from.x + from.w / 2)
+  const dy = (to.y + to.h / 2) - (from.y + from.h / 2)
+
+  // Resolve zone for both endpoints (node or sub-zone)
+  const zoneMap = nodeTopZoneMap.value
+  const zrList = layout.value.zoneRects
+  function resolveZone(name?: string): string | undefined {
+    if (!name) return undefined
+    const fromNode = zoneMap.get(name)
+    if (fromNode) return fromNode
+    // Sub-zone endpoint: look up rootName from zoneRects
+    return zrList.find(z => z.name === name)?.rootName
+  }
+
+  const fz = resolveZone(fromName)
+  const tz = resolveZone(toName)
+  const sameZone = fz && tz && fz === tz
+
+  if (sameZone) {
+    // Same zone: prefer vertical unless nearly horizontal (|dx| >> |dy|)
+    if (Math.abs(dx) >= Math.abs(dy) * 2.5) {
+      return dx >= 0
+        ? { fromSide: 'right', toSide: 'left' }
+        : { fromSide: 'left', toSide: 'right' }
+    }
     return dy >= 0
       ? { fromSide: 'bottom', toSide: 'top' }
       : { fromSide: 'top', toSide: 'bottom' }
   }
+
+  // Cross-zone: prefer horizontal only when clearly going sideways (|dx| >> |dy|)
+  if (Math.abs(dx) >= Math.abs(dy) * 0.85) {
+    return dx >= 0
+      ? { fromSide: 'right', toSide: 'left' }
+      : { fromSide: 'left', toSide: 'right' }
+  }
+  return dy >= 0
+    ? { fromSide: 'bottom', toSide: 'top' }
+    : { fromSide: 'top', toSide: 'bottom' }
 }
 
 interface PortPoint { x: number; y: number }
@@ -88,14 +122,14 @@ const portMap = computed(() => {
   const allRectsVal = allRects.value
   const conns = props.diagram.connections
 
-  // Step 1: determine sides for each connection
+  // Step 1: determine sides for each connection (zone-aware)
   const connSides: { fromSide: Side; toSide: Side }[] = []
   for (let i = 0; i < conns.length; i++) {
     const c = conns[i]
     const fromR = allRectsVal.get(c.from)
     const toR = allRectsVal.get(c.to)
     if (!fromR || !toR) { connSides.push({ fromSide: 'right', toSide: 'left' }); continue }
-    connSides.push(chooseSide(fromR, toR))
+    connSides.push(chooseSide(fromR, toR, c.from, c.to))
   }
 
   // Step 2: group connections by node+side
