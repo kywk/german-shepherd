@@ -401,7 +401,7 @@ const zoneColorMap = computed(() => {
       :nodes-draggable="isManualMode"
       :nodes-connectable="isManualMode"
       :edges-updatable="isManualMode"
-      :delete-key-code="isManualMode ? 'Delete' : null"
+      :delete-key-code="isManualMode ? ['Delete', 'Backspace'] : null"
       fit-view-on-init
       :min-zoom="0.2"
       :max-zoom="4"
