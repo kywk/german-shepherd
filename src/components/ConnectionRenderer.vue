@@ -9,7 +9,12 @@ const props = defineProps<{
   toPort: { x: number; y: number }
   fromSide: 'top' | 'bottom' | 'left' | 'right'
   allNodeRects?: Map<string, NodeRect>
+  isSelected?: boolean
+  waypoints?: { x: number; y: number }[]
+  hitAreaOnly?: boolean
 }>()
+
+const emit = defineEmits<{ click: [e: MouseEvent] }>()
 
 const GAP = 14 // clearance from node edges
 
@@ -129,6 +134,13 @@ const route = computed(() => {
   const { x: x2, y: y2 } = props.toPort
   if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) return null
 
+  // If waypoints are provided (manual mode), use them directly
+  if (props.waypoints && props.waypoints.length > 0) {
+    const points = [{ x: x1, y: y1 }, ...props.waypoints, { x: x2, y: y2 }]
+    const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+    return { path, labelX: (x1 + x2) / 2, labelY: (y1 + y2) / 2 }
+  }
+
   const horizontal = props.fromSide === 'left' || props.fromSide === 'right'
   let path: string
 
@@ -157,35 +169,46 @@ const label = computed(() =>
 </script>
 
 <template>
-  <g v-if="route" class="connection-group">
+  <g v-if="route" class="connection-group" @mousedown.stop="emit('click', $event)">
+    <!-- Wider invisible hit area for easier clicking -->
     <path
       :d="route.path"
       fill="none"
-      stroke="var(--conn-default)"
-      stroke-width="1.5"
-      stroke-linejoin="round"
-      :marker-end="connection.direction !== 'none' ? 'url(#arrow-end)' : undefined"
-      :marker-start="connection.direction === 'bidirectional' ? 'url(#arrow-start)' : undefined"
+      stroke="transparent"
+      stroke-width="14"
+      style="cursor: pointer; pointer-events: stroke"
     />
-    <rect
-      v-if="label"
-      :x="route.labelX - label.length * 3.2"
-      :y="route.labelY - 9"
-      :width="label.length * 6.4"
-      height="15"
-      rx="3"
-      fill="var(--color-bg-primary)"
-      fill-opacity="0.9"
-    />
-    <text
-      v-if="label"
-      :x="route.labelX"
-      :y="route.labelY"
-      text-anchor="middle"
-      dominant-baseline="middle"
-      font-size="9"
-      fill="var(--color-text-muted)"
-    >{{ label }}</text>
+    <template v-if="!hitAreaOnly">
+      <path
+        :d="route.path"
+        fill="none"
+        :stroke="isSelected ? 'var(--color-accent)' : 'var(--conn-default)'"
+        :stroke-width="isSelected ? 2.5 : 1.5"
+        stroke-linejoin="round"
+        style="pointer-events: none"
+        :marker-end="connection.direction !== 'none' ? 'url(#arrow-end)' : undefined"
+        :marker-start="connection.direction === 'bidirectional' ? 'url(#arrow-start)' : undefined"
+      />
+      <rect
+        v-if="label"
+        :x="route.labelX - label.length * 3.2"
+        :y="route.labelY - 9"
+        :width="label.length * 6.4"
+        height="15"
+        rx="3"
+        fill="var(--color-bg-primary)"
+        fill-opacity="0.9"
+      />
+      <text
+        v-if="label"
+        :x="route.labelX"
+        :y="route.labelY"
+        text-anchor="middle"
+        dominant-baseline="middle"
+        font-size="9"
+        fill="var(--color-text-muted)"
+      >{{ label }}</text>
+    </template>
   </g>
 </template>
 

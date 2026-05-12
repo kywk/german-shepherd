@@ -13,6 +13,7 @@ const props = defineProps<{
   showTags: boolean
   isLintWarning?: boolean
   diffState?: DiffState
+  isSelected?: boolean
 }>()
 
 const category = computed(() => NODE_TYPE_CATEGORY[props.node.type] ?? 'server')
@@ -52,8 +53,8 @@ function getIconChar(node: DiagramNode): string {
       rx="6"
       :fill="diffState && diffState !== 'unchanged' ? `var(--diff-${diffState})` : colorVar"
       :fill-opacity="diffState && diffState !== 'unchanged' ? 0.35 : 0.18"
-      :stroke="isLintWarning ? 'var(--lint-error)' : (diffState && diffState !== 'unchanged' ? `var(--diff-${diffState})` : colorVar)"
-      :stroke-width="diffState && diffState !== 'unchanged' ? 3 : (isLintWarning ? 2 : 1)"
+      :stroke="isSelected ? 'var(--color-accent)' : (isLintWarning ? 'var(--lint-error)' : (diffState && diffState !== 'unchanged' ? `var(--diff-${diffState})` : colorVar))"
+      :stroke-width="isSelected ? 2.5 : (diffState && diffState !== 'unchanged' ? 3 : (isLintWarning ? 2 : 1))"
       :stroke-dasharray="isLintWarning ? '4 3' : (diffState === 'removed' ? '6 3' : 'none')"
     />
 

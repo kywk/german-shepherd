@@ -11,7 +11,7 @@ function makeConn(from: string, to: string, protocol = 'HTTP', line = 10): Diagr
 }
 
 function makeDiagram(nodes: DiagramNode[], connections: DiagramConnection[]): NetworkDiagram {
-  return { meta: { title: 'T', display: 'LR', theme: 'simple' }, zones: [], connections, nodes }
+  return { meta: { title: 'T', display: 'LR', theme: 'simple' }, zones: [], connections, nodes, zoneNames: new Set() }
 }
 
 describe('lint', () => {

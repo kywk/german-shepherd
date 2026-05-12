@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useDiagramStore } from '@/stores/diagramStore'
-import { useDark, useToggle } from '@vueuse/core'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { useDark, useToggle, useDebounceFn } from '@vueuse/core'
 import DiagramRenderer from './DiagramRenderer.vue'
 
 const diagramStore = useDiagramStore()
+const canvasStore = useCanvasStore()
+const workspaceStore = useWorkspaceStore()
+
+// Sync layout when markdown text changes (from left panel editing)
+const debouncedSync = useDebounceFn(() => canvasStore.syncLayoutWithDiagram(), 500)
+watch(() => workspaceStore.currentRawText, () => {
+  if (canvasStore.isManualMode) debouncedSync()
+})
 
 // View overrides (don't modify raw text)
 const displayOverride = ref<'LR' | 'TD' | null>(null)
@@ -27,6 +37,26 @@ const activeDiagram = computed(() =>
     ? diagramStore.diffResult.mergedDiagram
     : diagramStore.parsedDiagram
 )
+
+// Keyboard shortcuts
+function onKeyDown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    e.preventDefault()
+    if (e.shiftKey) canvasStore.redo()
+    else canvasStore.undo()
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (canvasStore.selectedConnectionIndex !== null) {
+      canvasStore.removeConnection(canvasStore.selectedConnectionIndex)
+    }
+  }
+}
+
+onMounted(() => {
+  canvasStore.initUndo()
+  window.addEventListener('keydown', onKeyDown)
+})
+onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
 </script>
 
 <template>
@@ -39,6 +69,34 @@ const activeDiagram = computed(() =>
         </span>
       </div>
       <div class="header-right">
+        <!-- Manual mode toggle -->
+        <button
+          v-if="!canvasStore.isManualMode"
+          class="btn btn-ghost"
+          @click="canvasStore.enterManualMode()"
+          title="切換手動編輯模式"
+        ><i class="fa-solid fa-hand"></i></button>
+        <button
+          v-else
+          class="btn btn-primary"
+          @click="canvasStore.exitManualMode()"
+          title="退出手動模式（回到自動 layout）"
+        ><i class="fa-solid fa-wand-magic-sparkles"></i> Auto</button>
+
+        <!-- Undo/Redo -->
+        <button
+          class="btn btn-ghost"
+          :disabled="!canvasStore.canUndo"
+          @click="canvasStore.undo()"
+          title="Undo (Ctrl+Z)"
+        ><i class="fa-solid fa-rotate-left"></i></button>
+        <button
+          class="btn btn-ghost"
+          :disabled="!canvasStore.canRedo"
+          @click="canvasStore.redo()"
+          title="Redo (Ctrl+Shift+Z)"
+        ><i class="fa-solid fa-rotate-right"></i></button>
+
         <!-- Display toggle -->
         <div class="toggle-group" role="group" aria-label="佈局方向">
           <button
@@ -98,6 +156,7 @@ const activeDiagram = computed(() =>
         :show-tags="diagramStore.showTags"
         :lint-diagnostics="diagramStore.filteredDiagnostics"
         :node-diff-map="diagramStore.diffResult?.nodeDiffMap"
+        :is-manual-mode="canvasStore.isManualMode"
       />
     </div>
   </div>
