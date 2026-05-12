@@ -67,8 +67,6 @@ const markerStart = computed(() => {
     :stroke="selected ? 'var(--color-accent)' : 'var(--conn-default)'"
     :stroke-width="selected ? 2.5 : 1.5"
     stroke-linejoin="round"
-    :marker-end="markerEnd"
-    :marker-start="markerStart"
     style="pointer-events: none"
   />
   <g v-if="label" :transform="`translate(${labelX}, ${labelY})`">

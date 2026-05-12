@@ -11,6 +11,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import FlowNode from './FlowNode.vue'
 import FlowEdge from './FlowEdge.vue'
+import FlowZone from './FlowZone.vue'
 
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
@@ -58,9 +59,30 @@ const lintWarnNodes = computed(() => {
 const flowNodes = computed<Node[]>(() => {
   const ld = canvasStore.layoutData
   const autoRects = layout.value.nodeRects
+  const nodes: Node[] = []
 
-  return props.diagram.nodes.map(node => {
-    // Position: manual mode uses layout block, auto mode uses auto-layout
+  // Zone background nodes (rendered first = behind)
+  for (const zr of zoneRects.value) {
+    nodes.push({
+      id: `__zone__${zr.name}`,
+      type: 'gsZone',
+      position: { x: zr.x, y: zr.y },
+      data: {
+        name: zr.name,
+        depth: zr.depth,
+        color: zoneColorMap.value.get(zr.rootName) ?? ZONE_COLORS[0],
+        w: zr.w,
+        h: zr.h,
+      },
+      draggable: false,
+      selectable: false,
+      connectable: false,
+      zIndex: -1,
+    })
+  }
+
+  // Regular nodes
+  for (const node of props.diagram.nodes) {
     let x: number, y: number
     if (props.isManualMode && ld.nodes[node.name]) {
       x = ld.nodes[node.name].x
@@ -71,7 +93,7 @@ const flowNodes = computed<Node[]>(() => {
       y = rect?.y ?? 0
     }
 
-    return {
+    nodes.push({
       id: node.name,
       type: 'gsNode',
       position: { x, y },
@@ -85,8 +107,10 @@ const flowNodes = computed<Node[]>(() => {
         isLintWarning: lintWarnNodes.value.has(node.name),
       },
       draggable: props.isManualMode,
-    }
-  })
+    })
+  }
+
+  return nodes
 })
 
 const flowEdges = computed<Edge[]>(() => {
@@ -101,6 +125,8 @@ const flowEdges = computed<Edge[]>(() => {
       targetHandle: layoutConn ? `${conn.to}-${layoutConn.toSide}` : undefined,
       type: 'gsEdge',
       updatable: props.isManualMode,
+      markerEnd: conn.direction !== 'none' ? MarkerType.ArrowClosed : undefined,
+      markerStart: conn.direction === 'bidirectional' ? MarkerType.ArrowClosed : undefined,
       data: {
         protocol: conn.protocol,
         description: conn.description,
@@ -343,33 +369,12 @@ const zoneColorMap = computed(() => {
         <FlowNode v-bind="nodeProps" />
       </template>
 
-      <template #edge-gsEdge="edgeProps">
-        <FlowEdge v-bind="edgeProps" />
+      <template #node-gsZone="zoneProps">
+        <FlowZone v-bind="zoneProps" />
       </template>
 
-      <!-- Zone backgrounds rendered behind nodes -->
-      <template #viewport>
-        <svg class="zone-layer" style="position: absolute; inset: 0; pointer-events: none; overflow: visible;">
-          <defs>
-            <marker id="gs-arrow-end" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L8,3 z" fill="var(--conn-default)" />
-            </marker>
-            <marker id="gs-arrow-start" markerWidth="8" markerHeight="8" refX="2" refY="3" orient="auto-start-reverse">
-              <path d="M0,0 L0,6 L8,3 z" fill="var(--conn-default)" />
-            </marker>
-          </defs>
-          <g v-for="zr in zoneRects" :key="zr.name">
-            <template v-if="zr.depth === 0">
-              <line :x1="zr.x" :y1="zr.y" :x2="zr.x" :y2="zr.y + zr.h" stroke="var(--color-text-muted)" stroke-width="1.5" stroke-dasharray="6,4" stroke-opacity="0.55" />
-              <text :x="zr.x + zr.w / 2" :y="zr.y + 20" text-anchor="middle" dominant-baseline="middle" font-size="13" font-weight="700" fill="var(--color-text-primary)">{{ zr.name }}</text>
-            </template>
-            <template v-else>
-              <rect :x="zr.x" :y="zr.y" :width="zr.w" :height="zr.h" rx="8" :fill="zoneColorMap.get(zr.rootName) ?? ZONE_COLORS[0]" fill-opacity="0.1" :stroke="zoneColorMap.get(zr.rootName) ?? ZONE_COLORS[0]" stroke-opacity="0.4" stroke-width="1" />
-              <rect :x="zr.x" :y="zr.y" :width="zr.w" height="24" rx="8" :fill="zoneColorMap.get(zr.rootName) ?? ZONE_COLORS[0]" fill-opacity="0.3" />
-              <text :x="zr.x + 10" :y="zr.y + 14" dominant-baseline="middle" font-size="11" font-weight="600" fill="var(--color-text-primary)">{{ zr.name }}</text>
-            </template>
-          </g>
-        </svg>
+      <template #edge-gsEdge="edgeProps">
+        <FlowEdge v-bind="edgeProps" />
       </template>
 
       <Background />
