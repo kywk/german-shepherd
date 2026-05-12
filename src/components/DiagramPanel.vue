@@ -4,7 +4,7 @@ import { useDiagramStore } from '@/stores/diagramStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
 import { useDark, useToggle, useDebounceFn } from '@vueuse/core'
-import DiagramRenderer from './DiagramRenderer.vue'
+import FlowDiagramRenderer from './FlowDiagramRenderer.vue'
 
 const diagramStore = useDiagramStore()
 const canvasStore = useCanvasStore()
@@ -149,7 +149,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
     </div>
 
     <div class="panel-content">
-      <DiagramRenderer
+      <FlowDiagramRenderer
         :diagram="activeDiagram"
         :theme="theme"
         :display="display"
