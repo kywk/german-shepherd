@@ -898,19 +898,36 @@ function nodeSize() {
 
         <!-- Connection hit areas (on top of nodes for click priority in manual mode) -->
         <g v-if="isManualMode" class="connection-hit-areas">
+          <!-- Non-selected connections first (below) -->
           <ConnectionRenderer
             v-for="(conn, i) in diagram.connections"
             :key="`hit-${conn.from}-${conn.to}-${conn.line}`"
+            v-show="canvasStore.selectedConnectionIndex !== i"
             :connection="conn"
             :from-port="manualPortMap[i]?.from ?? { x: 0, y: 0 }"
             :to-port="manualPortMap[i]?.to ?? { x: 0, y: 0 }"
             :from-side="manualPortMap[i]?.fromSide ?? 'right'"
             :all-node-rects="allRects"
-            :is-selected="canvasStore.selectedConnectionIndex === i"
+            :is-selected="false"
             :waypoints="getConnectionWaypoints(i)"
             :hit-area-only="true"
             @click="() => canvasStore.selectConnection(i)"
             @dblclick.stop="(e: MouseEvent) => onConnectionDblClick(e, i)"
+          />
+          <!-- Selected connection last (on top) -->
+          <ConnectionRenderer
+            v-if="canvasStore.selectedConnectionIndex !== null"
+            :key="`hit-selected-${canvasStore.selectedConnectionIndex}`"
+            :connection="diagram.connections[canvasStore.selectedConnectionIndex]"
+            :from-port="manualPortMap[canvasStore.selectedConnectionIndex]?.from ?? { x: 0, y: 0 }"
+            :to-port="manualPortMap[canvasStore.selectedConnectionIndex]?.to ?? { x: 0, y: 0 }"
+            :from-side="manualPortMap[canvasStore.selectedConnectionIndex]?.fromSide ?? 'right'"
+            :all-node-rects="allRects"
+            :is-selected="true"
+            :waypoints="getConnectionWaypoints(canvasStore.selectedConnectionIndex)"
+            :hit-area-only="true"
+            @click="() => canvasStore.selectConnection(canvasStore.selectedConnectionIndex!)"
+            @dblclick.stop="(e: MouseEvent) => onConnectionDblClick(e, canvasStore.selectedConnectionIndex!)"
           />
         </g>
 

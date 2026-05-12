@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, watch, ref, nextTick } from 'vue'
-import { VueFlow, useVueFlow, Position, MarkerType } from '@vue-flow/core'
+import { computed, watch, ref } from 'vue'
+import { VueFlow, useVueFlow, MarkerType } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
 import { MiniMap } from '@vue-flow/minimap'
@@ -9,6 +9,10 @@ import type { NetworkDiagram, LintDiagnostic, DiffState } from '@/types/index'
 import { useLayout } from '@/composables/useLayout'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useWorkspaceStore } from '@/stores/workspaceStore'
+import { toLayoutGraph } from '@/layout/graphConverter'
+import { runElkLayout } from '@/layout/elkLayout'
+import { toVueFlowGraph } from '@/layout/vueFlowAdapter'
+import type { LayoutResult } from '@/layout/types'
 import FlowNode from './FlowNode.vue'
 import FlowEdge from './FlowEdge.vue'
 import FlowZone from './FlowZone.vue'
@@ -31,6 +35,27 @@ const props = defineProps<{
 const canvasStore = useCanvasStore()
 const workspaceStore = useWorkspaceStore()
 const layout = useLayout(() => props.diagram, () => props.display, () => props.theme)
+
+// ELK layout state
+const elkLayoutResult = ref<LayoutResult | null>(null)
+const elkFlowData = ref<{ nodes: Node[]; edges: Edge[] }>({ nodes: [], edges: [] })
+
+watch(
+  () => [props.diagram, props.display, props.theme, props.showTags, props.isManualMode] as const,
+  async ([diagram, display, theme, showTags, isManual]) => {
+    if (isManual || diagram.nodes.length === 0) return
+    const layoutGraph = toLayoutGraph(diagram, { theme, direction: display })
+    const result = await runElkLayout(layoutGraph)
+    elkLayoutResult.value = result
+    elkFlowData.value = toVueFlowGraph(result, diagram, {
+      theme,
+      showTags,
+      lintWarnNodes: lintWarnNodes.value,
+      isManualMode: false,
+    })
+  },
+  { immediate: true, deep: true }
+)
 
 // Connection form
 const showConnectionForm = ref(false)
@@ -56,7 +81,13 @@ const lintWarnNodes = computed(() => {
 
 // ─── Convert diagram data to Vue Flow nodes/edges ───
 
-const flowNodes = computed<Node[]>(() => {
+const flowNodes = computed((): Node[] => {
+  // Auto mode: use ELK layout results
+  if (!props.isManualMode && elkFlowData.value.nodes.length > 0) {
+    return elkFlowData.value.nodes
+  }
+
+  // Manual mode: use canvasStore positions with old layout as fallback
   const ld = canvasStore.layoutData
   const autoRects = layout.value.nodeRects
   const nodes: Node[] = []
@@ -84,7 +115,7 @@ const flowNodes = computed<Node[]>(() => {
   // Regular nodes
   for (const node of props.diagram.nodes) {
     let x: number, y: number
-    if (props.isManualMode && ld.nodes[node.name]) {
+    if (ld.nodes[node.name]) {
       x = ld.nodes[node.name].x
       y = ld.nodes[node.name].y
     } else {
@@ -106,21 +137,26 @@ const flowNodes = computed<Node[]>(() => {
         showTags: props.showTags,
         isLintWarning: lintWarnNodes.value.has(node.name),
       },
-      draggable: props.isManualMode,
+      draggable: true,
     })
   }
 
   return nodes
 })
 
-const flowEdges = computed<Edge[]>(() => {
+const flowEdges = computed(() => {
+  // Auto mode: use ELK layout results
+  if (!props.isManualMode && elkFlowData.value.edges.length > 0) {
+    return elkFlowData.value.edges
+  }
+
+  // Manual mode: use canvasStore layout data
   const ld = canvasStore.layoutData
   const nodeNames = new Set(props.diagram.nodes.map(n => n.name))
 
   // Resolve zone name to first node in that zone
   function resolveEndpoint(name: string): string {
     if (nodeNames.has(name)) return name
-    // Find first node in the named zone
     function findFirst(zones: typeof props.diagram.zones): string | null {
       for (const z of zones) {
         if (z.name === name) {
@@ -150,11 +186,10 @@ const flowEdges = computed<Edge[]>(() => {
     const source = resolveEndpoint(conn.from)
     const target = resolveEndpoint(conn.to)
 
-    // Find matching layout connection
     const key = `${conn.from}::${conn.to}`
     const candidates = layoutLookup.get(key) ?? []
     const usedIdx = layoutUsed.get(key) ?? 0
-    const layoutConn = props.isManualMode ? candidates[usedIdx] : undefined
+    const layoutConn = candidates[usedIdx]
     layoutUsed.set(key, usedIdx + 1)
 
     return {
@@ -164,7 +199,7 @@ const flowEdges = computed<Edge[]>(() => {
       sourceHandle: layoutConn ? `${source}-${layoutConn.fromSide}` : undefined,
       targetHandle: layoutConn ? `${target}-${layoutConn.toSide}` : undefined,
       type: 'gsEdge',
-      updatable: props.isManualMode,
+      updatable: props.isManualMode && canvasStore.selectedConnectionIndex === i,
       markerEnd: conn.direction !== 'none' ? MarkerType.ArrowClosed : undefined,
       markerStart: conn.direction === 'bidirectional' ? MarkerType.ArrowClosed : undefined,
       data: {
@@ -178,11 +213,74 @@ const flowEdges = computed<Edge[]>(() => {
 })
 
 // ─── Vue Flow instance ───
-const { onNodeDragStop, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick, onEdgeUpdate } = useVueFlow()
+const { onNodeDragStop, onNodeDrag, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick, onEdgeUpdate, onEdgeClick, getNodes, viewport } = useVueFlow()
+
+// ─── Alignment guides ───
+const SNAP_THRESHOLD = 5
+const alignmentGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
+
+onNodeDrag(({ node }) => {
+  if (!props.isManualMode) return
+  const draggedId = node.id
+  const dragX = node.position.x
+  const dragY = node.position.y
+  const dragW = node.dimensions?.width ?? 140
+  const dragH = node.dimensions?.height ?? 64
+  const dragCx = dragX + dragW / 2
+  const dragCy = dragY + dragH / 2
+
+  let closestX: number | null = null
+  let closestY: number | null = null
+  let minDx = SNAP_THRESHOLD + 1
+  let minDy = SNAP_THRESHOLD + 1
+
+  for (const other of getNodes.value) {
+    if (other.id === draggedId || other.type === 'gsZone') continue
+    const ox = other.position.x
+    const oy = other.position.y
+    const ow = other.dimensions?.width ?? 140
+    const oh = other.dimensions?.height ?? 64
+    const ocx = ox + ow / 2
+    const ocy = oy + oh / 2
+
+    // Check center-X alignment
+    const dxc = Math.abs(dragCx - ocx)
+    if (dxc < minDx) { minDx = dxc; closestX = ocx }
+    // Check left alignment
+    const dxl = Math.abs(dragX - ox)
+    if (dxl < minDx) { minDx = dxl; closestX = ox + dragW / 2 }
+    // Check right alignment
+    const dxr = Math.abs(dragX + dragW - (ox + ow))
+    if (dxr < minDx) { minDx = dxr; closestX = ox + ow - dragW / 2 }
+
+    // Check center-Y alignment
+    const dyc = Math.abs(dragCy - ocy)
+    if (dyc < minDy) { minDy = dyc; closestY = ocy }
+    // Check top alignment
+    const dyt = Math.abs(dragY - oy)
+    if (dyt < minDy) { minDy = dyt; closestY = oy + dragH / 2 }
+    // Check bottom alignment
+    const dyb = Math.abs(dragY + dragH - (oy + oh))
+    if (dyb < minDy) { minDy = dyb; closestY = oy + oh - dragH / 2 }
+  }
+
+  alignmentGuides.value = {
+    x: minDx <= SNAP_THRESHOLD ? closestX : null,
+    y: minDy <= SNAP_THRESHOLD ? closestY : null,
+  }
+})
+
+// Sync edge selection to canvasStore
+onEdgeClick(({ edge }) => {
+  if (!props.isManualMode) return
+  const idx = props.diagram.connections.findIndex((c, i) => `${c.from}-${c.to}-${i}` === edge.id)
+  if (idx >= 0) canvasStore.selectConnection(idx)
+})
 
 // Node drag end → update canvasStore
 onNodeDragStop(({ node }) => {
   if (!props.isManualMode) return
+  alignmentGuides.value = { x: null, y: null }
   canvasStore.moveNode(node.id, node.position.x, node.position.y)
 })
 
@@ -215,7 +313,7 @@ onEdgesChange((changes) => {
 })
 
 // Double-click empty area → add node
-onPaneClick((event) => {
+onPaneClick((_event) => {
   if (!props.isManualMode) return
   // Only on double-click (handled separately)
 })
@@ -400,8 +498,12 @@ const zoneColorMap = computed(() => {
       :edges="flowEdges"
       :nodes-draggable="isManualMode"
       :nodes-connectable="isManualMode"
-      :edges-updatable="isManualMode"
       :delete-key-code="isManualMode ? ['Delete', 'Backspace'] : null"
+      :elevate-edges-on-select="true"
+      :selection-key-code="null"
+      :multi-selection-key-code="null"
+      :pan-on-drag="true"
+      :selection-mode="'partial'"
       fit-view-on-init
       :min-zoom="0.2"
       :max-zoom="4"
@@ -421,6 +523,10 @@ const zoneColorMap = computed(() => {
       <Background />
       <Controls />
       <MiniMap />
+
+      <!-- Alignment guides during node drag -->
+      <div v-if="alignmentGuides.x !== null" class="alignment-guide-v" :style="{ left: `${alignmentGuides.x * viewport.zoom + viewport.x}px` }" />
+      <div v-if="alignmentGuides.y !== null" class="alignment-guide-h" :style="{ top: `${alignmentGuides.y * viewport.zoom + viewport.y}px` }" />
     </VueFlow>
 
     <div v-else class="empty-state">
@@ -502,4 +608,53 @@ const zoneColorMap = computed(() => {
 .form-row select, .form-row input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-secondary); color: var(--color-text-primary); font-size: 12px; }
 
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+</style>
+
+<style>
+.alignment-guide-v,
+.alignment-guide-h {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1000;
+}
+.alignment-guide-v {
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--color-accent, #0078d4);
+  opacity: 0.7;
+}
+.alignment-guide-h {
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--color-accent, #0078d4);
+  opacity: 0.7;
+}
+.vue-flow__node-gsZone {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  pointer-events: none !important;
+}
+.vue-flow__node-gsZone.selected,
+.vue-flow__node-gsZone.selectable,
+.vue-flow__node-gsZone:hover,
+.vue-flow__node-gsZone:focus,
+.vue-flow__node-gsZone:focus-visible,
+.vue-flow__node-gsZone.target,
+.vue-flow__node-gsZone.connecting {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+.vue-flow__node-gsZone .vue-flow__handle {
+  display: none !important;
+}
+.vue-flow__nodesselection-rect,
+.vue-flow__selection {
+  display: none !important;
+}
 </style>
