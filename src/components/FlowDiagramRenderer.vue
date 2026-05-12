@@ -115,14 +115,54 @@ const flowNodes = computed<Node[]>(() => {
 
 const flowEdges = computed<Edge[]>(() => {
   const ld = canvasStore.layoutData
+  const nodeNames = new Set(props.diagram.nodes.map(n => n.name))
+
+  // Resolve zone name to first node in that zone
+  function resolveEndpoint(name: string): string {
+    if (nodeNames.has(name)) return name
+    // Find first node in the named zone
+    function findFirst(zones: typeof props.diagram.zones): string | null {
+      for (const z of zones) {
+        if (z.name === name) {
+          for (const child of z.children) {
+            if (!('children' in child)) return (child as { name: string }).name
+          }
+        }
+        const subs = z.children.filter(c => 'children' in c) as typeof zones
+        const found = findFirst(subs)
+        if (found) return found
+      }
+      return null
+    }
+    return findFirst(props.diagram.zones) ?? name
+  }
+
+  // Build a lookup for layout connections by from+to (handle duplicates with counter)
+  const layoutLookup = new Map<string, typeof ld.connections[0][]>()
+  for (const lc of ld.connections) {
+    const key = `${lc.from}::${lc.to}`
+    if (!layoutLookup.has(key)) layoutLookup.set(key, [])
+    layoutLookup.get(key)!.push(lc)
+  }
+  const layoutUsed = new Map<string, number>()
+
   return props.diagram.connections.map((conn, i) => {
-    const layoutConn = props.isManualMode ? ld.connections[i] : undefined
+    const source = resolveEndpoint(conn.from)
+    const target = resolveEndpoint(conn.to)
+
+    // Find matching layout connection
+    const key = `${conn.from}::${conn.to}`
+    const candidates = layoutLookup.get(key) ?? []
+    const usedIdx = layoutUsed.get(key) ?? 0
+    const layoutConn = props.isManualMode ? candidates[usedIdx] : undefined
+    layoutUsed.set(key, usedIdx + 1)
+
     return {
       id: `${conn.from}-${conn.to}-${i}`,
-      source: conn.from,
-      target: conn.to,
-      sourceHandle: layoutConn ? `${conn.from}-${layoutConn.fromSide}` : undefined,
-      targetHandle: layoutConn ? `${conn.to}-${layoutConn.toSide}` : undefined,
+      source,
+      target,
+      sourceHandle: layoutConn ? `${source}-${layoutConn.fromSide}` : undefined,
+      targetHandle: layoutConn ? `${target}-${layoutConn.toSide}` : undefined,
       type: 'gsEdge',
       updatable: props.isManualMode,
       markerEnd: conn.direction !== 'none' ? MarkerType.ArrowClosed : undefined,
