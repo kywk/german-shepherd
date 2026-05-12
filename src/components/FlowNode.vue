@@ -45,11 +45,15 @@ function getIconChar(): string {
     :class="{ 'lint-warning': nodeData.isLintWarning }"
     :style="{ borderColor: colorVar, backgroundColor: `color-mix(in srgb, ${colorVar} 18%, transparent)` }"
   >
-    <!-- Handles for all 4 sides -->
+    <!-- Handles for all 4 sides (both source and target for reconnection) -->
     <Handle type="source" :position="Position.Top" :id="`${props.id}-top`" />
     <Handle type="source" :position="Position.Bottom" :id="`${props.id}-bottom`" />
     <Handle type="source" :position="Position.Left" :id="`${props.id}-left`" />
     <Handle type="source" :position="Position.Right" :id="`${props.id}-right`" />
+    <Handle type="target" :position="Position.Top" :id="`${props.id}-top`" />
+    <Handle type="target" :position="Position.Bottom" :id="`${props.id}-bottom`" />
+    <Handle type="target" :position="Position.Left" :id="`${props.id}-left`" />
+    <Handle type="target" :position="Position.Right" :id="`${props.id}-right`" />
 
     <template v-if="nodeData.theme === 'icon' || nodeData.theme === 'image'">
       <div class="node-icon" :style="{ color: colorVar }">{{ getIconChar() }}</div>

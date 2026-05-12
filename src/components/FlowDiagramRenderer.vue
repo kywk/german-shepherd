@@ -100,6 +100,7 @@ const flowEdges = computed<Edge[]>(() => {
       sourceHandle: layoutConn ? `${conn.from}-${layoutConn.fromSide}` : undefined,
       targetHandle: layoutConn ? `${conn.to}-${layoutConn.toSide}` : undefined,
       type: 'gsEdge',
+      updatable: props.isManualMode,
       data: {
         protocol: conn.protocol,
         description: conn.description,
@@ -111,12 +112,22 @@ const flowEdges = computed<Edge[]>(() => {
 })
 
 // ─── Vue Flow instance ───
-const { onNodeDragStop, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick } = useVueFlow()
+const { onNodeDragStop, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick, onEdgeUpdate } = useVueFlow()
 
 // Node drag end → update canvasStore
 onNodeDragStop(({ node }) => {
   if (!props.isManualMode) return
   canvasStore.moveNode(node.id, node.position.x, node.position.y)
+})
+
+// Edge reconnected to different handle (port change)
+onEdgeUpdate(({ edge, connection }) => {
+  if (!props.isManualMode) return
+  const idx = props.diagram.connections.findIndex((c, i) => `${c.from}-${c.to}-${i}` === edge.id)
+  if (idx < 0) return
+  const fromSide = (connection.sourceHandle?.split('-').pop() ?? 'right') as 'top' | 'bottom' | 'left' | 'right'
+  const toSide = (connection.targetHandle?.split('-').pop() ?? 'left') as 'top' | 'bottom' | 'left' | 'right'
+  canvasStore.updateConnectionSides(idx, fromSide, toSide)
 })
 
 // Connection created
