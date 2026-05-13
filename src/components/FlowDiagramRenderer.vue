@@ -81,6 +81,66 @@ const lintWarnNodes = computed(() => {
 
 // ─── Convert diagram data to Vue Flow nodes/edges ───
 
+const ZONE_COLORS = ['var(--zone-color-1)', 'var(--zone-color-2)', 'var(--zone-color-3)', 'var(--zone-color-4)', 'var(--zone-color-5)', 'var(--zone-color-6)']
+const zoneColorMap = computed(() => {
+  const map = new Map<string, string>()
+  props.diagram.zones.forEach((z, i) => map.set(z.name, ZONE_COLORS[i % ZONE_COLORS.length]))
+  return map
+})
+
+const zoneRects = computed(() => {
+  if (!props.isManualMode) return layout.value.zoneRects
+
+  const PAD = 30
+  const HEADER = 30
+  const rects: typeof layout.value.zoneRects = []
+  const nodeRects = new Map<string, { x: number; y: number; w: number; h: number }>()
+  const { w: NW, h: NH } = props.theme === 'simple' ? { w: 160, h: 70 } : { w: 120, h: 95 }
+  const ld = canvasStore.layoutData
+
+  for (const node of props.diagram.nodes) {
+    const pos = ld.nodes[node.name]
+    if (pos) nodeRects.set(node.name, { x: pos.x, y: pos.y, w: NW, h: NH })
+    else {
+      const auto = layout.value.nodeRects.get(node.name)
+      if (auto) nodeRects.set(node.name, auto)
+    }
+  }
+
+  function computeZone(zone: typeof props.diagram.zones[0], rootName: string) {
+    const names: string[] = []
+    function collect(z: typeof zone) {
+      for (const child of z.children) {
+        if ('children' in child) collect(child as typeof zone)
+        else names.push((child as { name: string }).name)
+      }
+    }
+    collect(zone)
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const name of names) {
+      const r = nodeRects.get(name)
+      if (!r) continue
+      if (r.x < minX) minX = r.x
+      if (r.y < minY) minY = r.y
+      if (r.x + r.w > maxX) maxX = r.x + r.w
+      if (r.y + r.h > maxY) maxY = r.y + r.h
+    }
+    if (minX === Infinity) return
+
+    const isTopLevel = zone.depth === 0
+    const zonePad = isTopLevel ? PAD + 20 : PAD
+    rects.push({ x: minX - zonePad, y: minY - PAD - HEADER, w: maxX - minX + zonePad * 2, h: maxY - minY + PAD * 2 + HEADER, depth: zone.depth, name: zone.name, rootName })
+
+    for (const child of zone.children) {
+      if ('children' in child) computeZone(child as typeof zone, rootName)
+    }
+  }
+
+  for (const zone of props.diagram.zones) computeZone(zone, zone.name)
+  return rects
+})
+
 const flowNodes = computed((): Node[] => {
   // Auto mode: use ELK layout results
   if (!props.isManualMode && elkFlowData.value.nodes.length > 0) {
@@ -92,42 +152,147 @@ const flowNodes = computed((): Node[] => {
   const autoRects = layout.value.nodeRects
   const nodes: Node[] = []
 
-  // Zone background nodes (rendered first = behind)
-  for (const zr of zoneRects.value) {
-    nodes.push({
-      id: `__zone__${zr.name}`,
-      type: 'gsZone',
-      position: { x: zr.x, y: zr.y },
-      data: {
-        name: zr.name,
-        depth: zr.depth,
-        color: zoneColorMap.value.get(zr.rootName) ?? ZONE_COLORS[0],
-        w: zr.w,
-        h: zr.h,
-      },
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      zIndex: -1,
-    })
-  }
+  const PAD = 30
+  const HEADER = 30
 
-  // Regular nodes
+  // Build node→zone mapping (only sub-zones, depth > 0)
+  const nodeZone = new Map<string, string>() // nodeName → zone id
+  const subZoneParent = new Map<string, string>() // subZoneName → parent zone id (for nested)
+  function walkZones(zones: typeof props.diagram.zones, parentZoneId?: string) {
+    for (const z of zones) {
+      const zoneId = `__zone__${z.name}`
+      if (z.depth > 0 && parentZoneId) {
+        subZoneParent.set(z.name, parentZoneId)
+      }
+      for (const child of z.children) {
+        if ('children' in child) {
+          walkZones([child as typeof z], z.depth > 0 ? zoneId : undefined)
+        } else {
+          if (z.depth > 0) nodeZone.set((child as { name: string }).name, zoneId)
+        }
+      }
+    }
+  }
+  walkZones(props.diagram.zones)
+
+  // Compute absolute positions for all nodes
+  const absPositions = new Map<string, { x: number; y: number }>()
   for (const node of props.diagram.nodes) {
-    let x: number, y: number
     if (ld.nodes[node.name]) {
-      x = ld.nodes[node.name].x
-      y = ld.nodes[node.name].y
+      absPositions.set(node.name, ld.nodes[node.name])
     } else {
       const rect = autoRects.get(node.name)
-      x = rect?.x ?? 0
-      y = rect?.y ?? 0
+      absPositions.set(node.name, { x: rect?.x ?? 0, y: rect?.y ?? 0 })
     }
+  }
 
-    nodes.push({
+  // Compute sub-zone rects from child node positions (absolute)
+  const { w: NW, h: NH } = props.theme === 'simple' ? { w: 160, h: 70 } : { w: 120, h: 95 }
+  const zoneAbsRects = new Map<string, { x: number; y: number; w: number; h: number }>()
+
+  function computeSubZoneRect(zone: typeof props.diagram.zones[0]) {
+    if (zone.depth === 0) {
+      for (const child of zone.children) {
+        if ('children' in child) computeSubZoneRect(child as typeof zone)
+      }
+      return
+    }
+    // Collect all descendant nodes
+    const names: string[] = []
+    function collect(z: typeof zone) {
+      for (const child of z.children) {
+        if ('children' in child) collect(child as typeof zone)
+        else names.push((child as { name: string }).name)
+      }
+    }
+    collect(zone)
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const name of names) {
+      const pos = absPositions.get(name)
+      if (!pos) continue
+      if (pos.x < minX) minX = pos.x
+      if (pos.y < minY) minY = pos.y
+      if (pos.x + NW > maxX) maxX = pos.x + NW
+      if (pos.y + NH > maxY) maxY = pos.y + NH
+    }
+    if (minX === Infinity) return
+
+    zoneAbsRects.set(zone.name, {
+      x: minX - PAD,
+      y: minY - PAD - HEADER,
+      w: maxX - minX + PAD * 2,
+      h: maxY - minY + PAD * 2 + HEADER,
+    })
+
+    // Recurse for nested sub-zones
+    for (const child of zone.children) {
+      if ('children' in child) computeSubZoneRect(child as typeof zone)
+    }
+  }
+  for (const zone of props.diagram.zones) computeSubZoneRect(zone)
+
+  // Create sub-zone group nodes (depth > 0 only — top-level zones stay as background)
+  for (const zone of props.diagram.zones) {
+    function addSubZoneNodes(z: typeof zone, rootName: string) {
+      if (z.depth > 0) {
+        const rect = zoneAbsRects.get(z.name)
+        if (rect) {
+          nodes.push({
+            id: `__zone__${z.name}`,
+            type: 'gsZone',
+            position: { x: rect.x, y: rect.y },
+            style: { width: `${rect.w}px`, height: `${rect.h}px` },
+            data: {
+              name: z.name,
+              depth: z.depth,
+              color: zoneColorMap.value.get(rootName) ?? ZONE_COLORS[0],
+              w: rect.w,
+              h: rect.h,
+            },
+            draggable: false,
+            selectable: false,
+            connectable: true,
+          })
+        }
+      }
+      for (const child of z.children) {
+        if ('children' in child) addSubZoneNodes(child as typeof zone, rootName)
+      }
+    }
+    addSubZoneNodes(zone, zone.name)
+  }
+
+  // Top-level zone backgrounds (depth === 0, non-interactive)
+  for (const zr of zoneRects.value) {
+    if (zr.depth === 0) {
+      nodes.push({
+        id: `__zone__${zr.name}`,
+        type: 'gsZone',
+        position: { x: zr.x, y: zr.y },
+        data: {
+          name: zr.name,
+          depth: 0,
+          color: zoneColorMap.value.get(zr.rootName) ?? ZONE_COLORS[0],
+          w: zr.w,
+          h: zr.h,
+        },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        zIndex: -1,
+      })
+    }
+  }
+
+  // Regular nodes — absolute positions (no parentNode to avoid Vue Flow group issues)
+  for (const node of props.diagram.nodes) {
+    const abs = absPositions.get(node.name)!
+
+    const n: Node = {
       id: node.name,
       type: 'gsNode',
-      position: { x, y },
+      position: { x: abs.x, y: abs.y },
       data: {
         name: node.name,
         type: node.type,
@@ -138,7 +303,8 @@ const flowNodes = computed((): Node[] => {
         isLintWarning: lintWarnNodes.value.has(node.name),
       },
       draggable: true,
-    })
+    }
+    nodes.push(n)
   }
 
   return nodes
@@ -154,23 +320,10 @@ const flowEdges = computed(() => {
   const ld = canvasStore.layoutData
   const nodeNames = new Set(props.diagram.nodes.map(n => n.name))
 
-  // Resolve zone name to first node in that zone
+  // Resolve zone name to zone group node id
   function resolveEndpoint(name: string): string {
     if (nodeNames.has(name)) return name
-    function findFirst(zones: typeof props.diagram.zones): string | null {
-      for (const z of zones) {
-        if (z.name === name) {
-          for (const child of z.children) {
-            if (!('children' in child)) return (child as { name: string }).name
-          }
-        }
-        const subs = z.children.filter(c => 'children' in c) as typeof zones
-        const found = findFirst(subs)
-        if (found) return found
-      }
-      return null
-    }
-    return findFirst(props.diagram.zones) ?? name
+    return `__zone__${name}`
   }
 
   // Build a lookup for layout connections by from+to (handle duplicates with counter)
@@ -192,12 +345,12 @@ const flowEdges = computed(() => {
     const layoutConn = candidates[usedIdx]
     layoutUsed.set(key, usedIdx + 1)
 
-    return {
+    const edge = {
       id: `${conn.from}-${conn.to}-${i}`,
       source,
       target,
-      sourceHandle: layoutConn ? `${source}-${layoutConn.fromSide}` : undefined,
-      targetHandle: layoutConn ? `${target}-${layoutConn.toSide}` : undefined,
+      sourceHandle: layoutConn ? `${source}-${layoutConn.fromSide}` : `${source}-right`,
+      targetHandle: layoutConn ? `${target}-${layoutConn.toSide}` : `${target}-left`,
       type: 'gsEdge',
       updatable: props.isManualMode && canvasStore.selectedConnectionIndex === i,
       markerEnd: conn.direction !== 'none' ? MarkerType.ArrowClosed : undefined,
@@ -209,13 +362,31 @@ const flowEdges = computed(() => {
         waypoints: layoutConn?.waypoints,
       },
     }
+    if (target.startsWith('__zone__') || source.startsWith('__zone__')) {
+      console.log('[edge]', conn.from, '->', conn.to, { source, target, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle })
+    }
+    return edge
   })
 })
 
 // ─── Vue Flow instance ───
-const { onNodeDragStop, onNodeDrag, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick, onEdgeUpdate, onEdgeClick, getNodes, viewport } = useVueFlow()
+const { onNodeDragStop, onNodeDrag, onConnect, onEdgesChange, onPaneClick, onNodeDoubleClick, onEdgeUpdate, onEdgeClick, getNodes, viewport, updateNodeInternals, onNodesInitialized } = useVueFlow()
 
-// ─── Alignment guides ───
+// Force handle bounds recalculation for zone nodes after render
+onNodesInitialized(() => {
+  const zoneIds = getNodes.value.filter(n => n.type === 'gsZone' && n.connectable).map(n => n.id)
+  if (zoneIds.length) setTimeout(() => updateNodeInternals(zoneIds), 50)
+})
+
+watch(() => props.isManualMode, (manual) => {
+  if (manual) {
+    setTimeout(() => {
+      const zoneIds = getNodes.value.filter(n => n.type === 'gsZone' && n.connectable).map(n => n.id)
+      if (zoneIds.length) updateNodeInternals(zoneIds)
+    }, 200)
+  }
+})
+
 const SNAP_THRESHOLD = 5
 const alignmentGuides = ref<{ x: number | null; y: number | null }>({ x: null, y: null })
 
@@ -441,67 +612,8 @@ function onPaneDblClick(event: MouseEvent) {
   }
 }
 
-// ─── Zone backgrounds (rendered as panel overlays) ───
-const zoneRects = computed(() => {
-  if (!props.isManualMode) return layout.value.zoneRects
 
-  const PAD = 30
-  const HEADER = 30
-  const rects: typeof layout.value.zoneRects = []
-  const nodeRects = new Map<string, { x: number; y: number; w: number; h: number }>()
-  // Node rendered width is wider than the fixed size due to padding/text
-  const { w: NW, h: NH } = props.theme === 'simple' ? { w: 160, h: 70 } : { w: 120, h: 95 }
-  const ld = canvasStore.layoutData
 
-  for (const node of props.diagram.nodes) {
-    const pos = ld.nodes[node.name]
-    if (pos) nodeRects.set(node.name, { x: pos.x, y: pos.y, w: NW, h: NH })
-    else {
-      const auto = layout.value.nodeRects.get(node.name)
-      if (auto) nodeRects.set(node.name, auto)
-    }
-  }
-
-  function computeZone(zone: typeof props.diagram.zones[0], rootName: string) {
-    const names: string[] = []
-    function collect(z: typeof zone) {
-      for (const child of z.children) {
-        if ('children' in child) collect(child as typeof zone)
-        else names.push((child as { name: string }).name)
-      }
-    }
-    collect(zone)
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-    for (const name of names) {
-      const r = nodeRects.get(name)
-      if (!r) continue
-      if (r.x < minX) minX = r.x
-      if (r.y < minY) minY = r.y
-      if (r.x + r.w > maxX) maxX = r.x + r.w
-      if (r.y + r.h > maxY) maxY = r.y + r.h
-    }
-    if (minX === Infinity) return
-
-    const isTopLevel = zone.depth === 0
-    const zonePad = isTopLevel ? PAD + 20 : PAD
-    rects.push({ x: minX - zonePad, y: minY - PAD - HEADER, w: maxX - minX + zonePad * 2, h: maxY - minY + PAD * 2 + HEADER, depth: zone.depth, name: zone.name, rootName })
-
-    for (const child of zone.children) {
-      if ('children' in child) computeZone(child as typeof zone, rootName)
-    }
-  }
-
-  for (const zone of props.diagram.zones) computeZone(zone, zone.name)
-  return rects
-})
-
-const ZONE_COLORS = ['var(--zone-color-1)', 'var(--zone-color-2)', 'var(--zone-color-3)', 'var(--zone-color-4)', 'var(--zone-color-5)', 'var(--zone-color-6)']
-const zoneColorMap = computed(() => {
-  const map = new Map<string, string>()
-  props.diagram.zones.forEach((z, i) => map.set(z.name, ZONE_COLORS[i % ZONE_COLORS.length]))
-  return map
-})
 </script>
 
 <template>
@@ -666,7 +778,8 @@ const zoneColorMap = computed(() => {
   outline: none !important;
 }
 .vue-flow__node-gsZone .vue-flow__handle {
-  display: none !important;
+  width: 8px;
+  height: 8px;
 }
 .vue-flow__nodesselection-rect,
 .vue-flow__selection {

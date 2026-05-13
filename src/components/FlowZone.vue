@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Handle, Position } from '@vue-flow/core'
 import type { NodeProps } from '@vue-flow/core'
 import { computed } from 'vue'
 
@@ -24,6 +25,18 @@ const zoneData = computed(() => props.data as {
       backgroundColor: zoneData.depth === 0 ? 'transparent' : `color-mix(in srgb, ${zoneData.color} 8%, transparent)`,
     }"
   >
+    <!-- Handles for sub-zones so edges can connect to the group boundary -->
+    <template v-if="zoneData.depth > 0">
+      <Handle type="source" :position="Position.Top" :id="`${props.id}-top`" />
+      <Handle type="source" :position="Position.Bottom" :id="`${props.id}-bottom`" />
+      <Handle type="source" :position="Position.Left" :id="`${props.id}-left`" />
+      <Handle type="source" :position="Position.Right" :id="`${props.id}-right`" />
+      <Handle type="target" :position="Position.Top" :id="`${props.id}-top`" />
+      <Handle type="target" :position="Position.Bottom" :id="`${props.id}-bottom`" />
+      <Handle type="target" :position="Position.Left" :id="`${props.id}-left`" />
+      <Handle type="target" :position="Position.Right" :id="`${props.id}-right`" />
+    </template>
+
     <div
       class="zone-header"
       :class="{ 'top-level-header': zoneData.depth === 0 }"
