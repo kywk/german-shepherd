@@ -268,6 +268,10 @@ onNodeDrag(({ node }) => {
     x: minDx <= SNAP_THRESHOLD ? closestX : null,
     y: minDy <= SNAP_THRESHOLD ? closestY : null,
   }
+
+  // Snap node position
+  if (minDx <= SNAP_THRESHOLD && closestX !== null) node.position.x = closestX - dragW / 2
+  if (minDy <= SNAP_THRESHOLD && closestY !== null) node.position.y = closestY - dragH / 2
 })
 
 // Sync edge selection to canvasStore
@@ -289,9 +293,19 @@ onEdgeUpdate(({ edge, connection }) => {
   if (!props.isManualMode) return
   const idx = props.diagram.connections.findIndex((c, i) => `${c.from}-${c.to}-${i}` === edge.id)
   if (idx < 0) return
+  const conn = props.diagram.connections[idx]
   const fromSide = (connection.sourceHandle?.split('-').pop() ?? 'right') as 'top' | 'bottom' | 'left' | 'right'
   const toSide = (connection.targetHandle?.split('-').pop() ?? 'left') as 'top' | 'bottom' | 'left' | 'right'
-  canvasStore.updateConnectionSides(idx, fromSide, toSide)
+
+  // Find matching layout connection by from/to
+  const ld = canvasStore.layoutData
+  const layoutIdx = ld.connections.findIndex(lc => lc.from === conn.from && lc.to === conn.to)
+  if (layoutIdx >= 0) {
+    canvasStore.updateConnectionSides(layoutIdx, fromSide, toSide)
+  } else {
+    // Connection not in layout block yet — add it
+    canvasStore.addConnection({ from: conn.from, to: conn.to, fromSide, toSide, waypoints: [] })
+  }
 })
 
 // Connection created
@@ -498,6 +512,7 @@ const zoneColorMap = computed(() => {
       :edges="flowEdges"
       :nodes-draggable="isManualMode"
       :nodes-connectable="isManualMode"
+      :edges-updatable="isManualMode"
       :delete-key-code="isManualMode ? ['Delete', 'Backspace'] : null"
       :elevate-edges-on-select="true"
       :selection-key-code="null"
