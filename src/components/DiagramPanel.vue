@@ -83,6 +83,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeyDown))
           title="退出手動模式（回到自動 layout）"
         ><i class="fa-solid fa-wand-magic-sparkles"></i> Auto</button>
 
+        <!-- Reset layout -->
+        <button
+          class="btn btn-ghost"
+          @click="canvasStore.resetLayout()"
+          title="重置手動佈局"
+        ><i class="fa-solid fa-arrows-rotate"></i></button>
+
         <!-- Undo/Redo -->
         <button
           class="btn btn-ghost"

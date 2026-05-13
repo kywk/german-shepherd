@@ -48,6 +48,13 @@ export const useCanvasStore = defineStore('canvas', () => {
   // ─── Mode switching ───
   function enterManualMode() {
     if (isManualMode.value) return
+    // If layout block already exists, just enter manual mode
+    const existing = parseLayout(workspaceStore.currentRawText)
+    if (existing && Object.keys(existing.nodes).length > 0) {
+      isManualMode.value = true
+      return
+    }
+
     // Snapshot current auto-layout positions into code block
     const diagram = diagramStore.parsedDiagram
     const autoLayout = useLayout(() => diagram, () => diagram.meta.display, () => diagram.meta.theme)
@@ -79,10 +86,15 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   function exitManualMode() {
     if (!isManualMode.value) return
+    isManualMode.value = false
+    selectedNodeName.value = null
+    selectedConnectionIndex.value = null
+  }
+
+  function resetLayout() {
     pushUndo()
     const cleaned = removeLayoutBlock(workspaceStore.currentRawText)
     workspaceStore.updateCurrentRawText(cleaned)
-    pushUndo()
     isManualMode.value = false
     selectedNodeName.value = null
     selectedConnectionIndex.value = null
@@ -342,6 +354,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     // Mode
     enterManualMode,
     exitManualMode,
+    resetLayout,
     // Node actions
     moveNode,
     moveNodeLive,
