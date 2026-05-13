@@ -3,7 +3,7 @@ import type { LayoutGraph, LayoutResult, PositionedNode, PositionedEdge, Positio
 
 const elk = new ELK()
 
-const PADDING = 20
+const PADDING = 24
 const HEADER_HEIGHT = 30
 
 /**
@@ -24,20 +24,39 @@ function toElkGraph(graph: LayoutGraph) {
   const topGroups = graph.groups.filter(g => !g.parentId)
   const childGroupsOf = (parentId: string) => graph.groups.filter(g => g.parentId === parentId)
 
+  /** Pick direction for a group based on structure */
+  function pickDirection(groupId: string, parentDir: string): string {
+    const childGroups = childGroupsOf(groupId)
+    const directNodes = graph.nodes.filter(n => n.parentId === groupId).length
+    // Sub-zones with many nodes → use RIGHT for 2-col grid effect
+    if (childGroups.length === 0 && directNodes >= 4) return 'RIGHT'
+    // Top-level zones and zones with sub-groups → DOWN (vertical stacking)
+    return 'DOWN'
+  }
+
   // Build ELK children recursively
-  function buildGroup(groupId: string): any {
+  function buildGroup(groupId: string, parentDir: string, partition?: number): any {
     const group = groupMap.get(groupId)!
     const childGroups = childGroupsOf(groupId)
     const childNodes = graph.nodes.filter(n => n.parentId === groupId)
+    const groupDir = pickDirection(groupId, parentDir)
+
+    const opts: Record<string, string> = {
+      'elk.padding': `[top=${PADDING + HEADER_HEIGHT},left=${PADDING},bottom=${PADDING},right=${PADDING}]`,
+      'elk.direction': groupDir,
+      'elk.spacing.nodeNode': '20',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '30',
+    }
+    if (partition !== undefined) {
+      opts['elk.partitioning.partition'] = String(partition)
+    }
 
     return {
       id: groupId,
       labels: [{ text: group.label }],
-      layoutOptions: {
-        'elk.padding': `[top=${PADDING + HEADER_HEIGHT},left=${PADDING},bottom=${PADDING},right=${PADDING}]`,
-      },
+      layoutOptions: opts,
       children: [
-        ...childGroups.map(cg => buildGroup(cg.id)),
+        ...childGroups.map(cg => buildGroup(cg.id, groupDir)),
         ...childNodes.map(n => ({
           id: n.id,
           width: n.width,
@@ -51,9 +70,9 @@ function toElkGraph(graph: LayoutGraph) {
   // Top-level nodes (no parent group)
   const topNodes = graph.nodes.filter(n => !n.parentId)
 
-  // Build top-level ELK graph
+  // Build top-level ELK graph — assign partition index to enforce zone order
   const elkChildren = [
-    ...topGroups.map(g => buildGroup(g.id)),
+    ...topGroups.map((g, i) => buildGroup(g.id, direction, i)),
     ...topNodes.map(n => ({ id: n.id, width: n.width, height: n.height })),
   ]
 
@@ -70,11 +89,18 @@ function toElkGraph(graph: LayoutGraph) {
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': direction,
-      'elk.spacing.nodeNode': '30',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '60',
+      'elk.spacing.nodeNode': '25',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '35',
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
       'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
       'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.compaction.postCompaction.strategy': 'LEFT',
+      'elk.layered.compaction.postCompaction.constraints': 'SCANLINE',
+      'elk.layered.compaction.connectedComponents': 'true',
+      'elk.separateConnectedComponents': 'false',
+      'elk.partitioning.activate': 'true',
+      'elk.layered.mergeEdges': 'true',
     },
     children: elkChildren,
     edges: elkEdges,

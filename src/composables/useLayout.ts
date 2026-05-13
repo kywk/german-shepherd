@@ -5,13 +5,12 @@ import { isZone } from '@/types/index'
 export interface NodeRect { x: number; y: number; w: number; h: number }
 export interface ZoneRect { x: number; y: number; w: number; h: number; depth: number; name: string; rootName: string }
 
-const NODE_GAP = 20
-const ZONE_PAD = 18
-const ZONE_HEADER = 26
-const ZONE_GAP = 28
-const MARGIN = 44
-const MAX_PER_COL = 4
-const ROW_GAP = 16
+const NODE_GAP = 28
+const ZONE_PAD = 20
+const ZONE_HEADER = 28
+const ZONE_GAP = 36
+const MARGIN = 48
+const ROW_GAP = 24
 
 interface LayoutResult {
   nodeRects: Map<string, NodeRect>
@@ -27,8 +26,6 @@ type Dir = 'LR' | 'TD'
 function nodeSize(theme: string) {
   return theme === 'simple' ? { w: 140, h: 64 } : { w: 100, h: 90 }
 }
-
-function opposite(dir: Dir): Dir { return dir === 'LR' ? 'TD' : 'LR' }
 
 // ============================================================
 // Row-based layout for LR mode
@@ -470,25 +467,26 @@ function layoutZoneColumnLR(
       orderedNodes.forEach((node, idx) => {
         const gridCol = idx % cols
         const gridRow = Math.floor(idx / cols)
-        const nx = curSubX + gridCol * (NW + NODE_GAP)
+        const nx = curSubX + ZONE_PAD + gridCol * (NW + NODE_GAP)
         const ny = MARGIN + (anchorRow + gridRow) * rowHeight
         nodeRects.set(node.name, { x: nx, y: ny, w: NW, h: NH })
       })
 
       const rowSpan = Math.ceil(orderedNodes.length / cols)
-      const szW = cols * NW + (cols - 1) * NODE_GAP
+      const szContentW = cols * NW + (cols - 1) * NODE_GAP
+      const szW = szContentW + ZONE_PAD * 2
       const szH = rowSpan * NH + (rowSpan - 1) * ROW_GAP
 
       const maxChildDepth = getMaxDepth(sz) - sz.depth
       const headerStack = maxChildDepth * (ZONE_HEADER + 6)
       const szY = MARGIN + anchorRow * rowHeight - ZONE_PAD - ZONE_HEADER - headerStack
       const szBottom = MARGIN + anchorRow * rowHeight + szH + ZONE_PAD
-      const szTotalW = szW + ZONE_PAD * 2
+      const szTotalW = szW
       const szTotalH = szBottom - szY
 
-      zoneRects.push({ x: curSubX - ZONE_PAD, y: szY, w: szTotalW, h: szTotalH, depth: sz.depth, name: sz.name, rootName })
+      zoneRects.push({ x: curSubX, y: szY, w: szTotalW, h: szTotalH, depth: sz.depth, name: sz.name, rootName })
 
-      const szRight = curSubX + szW
+      const szRight = curSubX + szTotalW
       if (szRight > maxSubRight) maxSubRight = szRight
       curSubX += szTotalW + ZONE_GAP
     }
@@ -550,115 +548,6 @@ function layoutZoneColumnLR(
 }
 
 // ============================================================
-// Original block-based layout for TD mode
-// ============================================================
-
-function layoutNodeBlock(
-  nodes: DiagramNode[],
-  nodeRects: Map<string, NodeRect>,
-  ox: number, oy: number,
-  dir: Dir, theme: string
-): { w: number; h: number } {
-  const { w: NW, h: NH } = nodeSize(theme)
-  const n = nodes.length
-  const cols = Math.min(3, Math.ceil(n / MAX_PER_COL))
-  const perCol = Math.ceil(n / cols)
-
-  if (dir === 'LR') {
-    let totalH = 0
-    for (let c = 0; c < cols; c++) {
-      const start = c * perCol
-      const end = Math.min(start + perCol, n)
-      for (let i = start; i < end; i++) {
-        nodeRects.set(nodes[i].name, {
-          x: ox + c * (NW + NODE_GAP),
-          y: oy + (i - start) * (NH + NODE_GAP),
-          w: NW, h: NH,
-        })
-      }
-      const colH = (end - start) * (NH + NODE_GAP) - NODE_GAP
-      if (colH > totalH) totalH = colH
-    }
-    return { w: cols * (NW + NODE_GAP) - NODE_GAP, h: totalH }
-  } else {
-    let totalW = 0
-    for (let r = 0; r < cols; r++) {
-      const start = r * perCol
-      const end = Math.min(start + perCol, n)
-      for (let i = start; i < end; i++) {
-        nodeRects.set(nodes[i].name, {
-          x: ox + (i - start) * (NW + NODE_GAP),
-          y: oy + r * (NH + NODE_GAP),
-          w: NW, h: NH,
-        })
-      }
-      const rowW = (end - start) * (NW + NODE_GAP) - NODE_GAP
-      if (rowW > totalW) totalW = rowW
-    }
-    return { w: totalW, h: cols * (NH + NODE_GAP) - NODE_GAP }
-  }
-}
-
-function layoutZone(
-  zone: DiagramZone,
-  nodeRects: Map<string, NodeRect>,
-  zoneRects: ZoneRect[],
-  ox: number, oy: number,
-  dir: Dir, theme: string, rootName: string
-): { w: number; h: number } {
-  const innerX = ox + ZONE_PAD
-  const innerY = oy + ZONE_HEADER + ZONE_PAD
-
-  type Block = { kind: 'zone'; zone: DiagramZone } | { kind: 'nodes'; nodes: DiagramNode[] }
-  const blocks: Block[] = []
-  for (const child of zone.children) {
-    if (isZone(child)) {
-      blocks.push({ kind: 'zone', zone: child })
-    } else {
-      const last = blocks[blocks.length - 1]
-      if (last?.kind === 'nodes') last.nodes.push(child)
-      else blocks.push({ kind: 'nodes', nodes: [child] })
-    }
-  }
-
-  let curMain = 0
-  let maxCross = 0
-
-  for (const block of blocks) {
-    if (curMain > 0) curMain += ZONE_GAP
-    if (block.kind === 'zone') {
-      const bx = dir === 'LR' ? innerX : innerX + curMain
-      const by = dir === 'LR' ? innerY + curMain : innerY
-      const { w, h } = layoutZone(block.zone, nodeRects, zoneRects, bx, by, opposite(dir), theme, rootName)
-      if (dir === 'LR') { curMain += h; if (w > maxCross) maxCross = w }
-      else { curMain += w; if (h > maxCross) maxCross = h }
-    } else {
-      const bx = dir === 'LR' ? innerX : innerX + curMain
-      const by = dir === 'LR' ? innerY + curMain : innerY
-      const { w, h } = layoutNodeBlock(block.nodes, nodeRects, bx, by, dir, theme)
-      if (dir === 'LR') { curMain += h; if (w > maxCross) maxCross = w }
-      else { curMain += w; if (h > maxCross) maxCross = h }
-    }
-  }
-
-  const { w: NW } = nodeSize(theme)
-  const contentMain = Math.max(curMain, NW)
-  const contentCross = Math.max(maxCross, NW)
-
-  let totalW: number, totalH: number
-  if (dir === 'LR') {
-    totalW = contentCross + ZONE_PAD * 2
-    totalH = contentMain + ZONE_HEADER + ZONE_PAD * 2
-  } else {
-    totalW = contentMain + ZONE_PAD * 2
-    totalH = contentCross + ZONE_HEADER + ZONE_PAD * 2
-  }
-
-  zoneRects.push({ x: ox, y: oy, w: totalW, h: totalH, depth: zone.depth, name: zone.name, rootName })
-  return { w: totalW, h: totalH }
-}
-
-// ============================================================
 // Entry point
 // ============================================================
 
@@ -670,22 +559,6 @@ export function useLayout(
   return computed<LayoutResult>(() => {
     const d = diagram()
     const t = theme()
-    const dir = display()
-
-    if (dir === 'LR') {
-      return layoutLR(d, t)
-    } else {
-      const nodeRects = new Map<string, NodeRect>()
-      const zoneRects: ZoneRect[] = []
-      const nodeZoneMap = buildNodeZoneMap(d)
-      let curY = MARGIN
-      let maxW = 0
-      for (const zone of d.zones) {
-        const { w, h } = layoutZone(zone, nodeRects, zoneRects, MARGIN, curY, dir, t, zone.name)
-        curY += h + ZONE_GAP
-        if (w > maxW) maxW = w
-      }
-      return { nodeRects, zoneRects, totalW: maxW + MARGIN * 2, totalH: curY + MARGIN, nodeZoneMap }
-    }
+    return layoutLR(d, t)
   })
 }
