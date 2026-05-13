@@ -16,7 +16,7 @@
   --node-server: hsl(150, 70%, 60%);
 
   /* Connection colors */
-  --conn-default: var(--color-text-muted);
+  --conn-default: #3d4654;
   --conn-highlight: var(--color-accent);
 
   /* Lint */
@@ -38,6 +38,14 @@
   --zone-color-4: hsl(270, 50%, 75%);
   --zone-color-5: hsl(30, 50%, 75%);
   --zone-color-6: hsl(330, 50%, 75%);
+
+  /* Node type colors - deeper for light bg */
+  --node-client: hsl(210, 55%, 40%);
+  --node-network: hsl(30, 55%, 40%);
+  --node-server: hsl(150, 45%, 35%);
+
+  /* Connection - darker on light bg */
+  --conn-default: #374151;
 }
 
 /* Reset & Base */

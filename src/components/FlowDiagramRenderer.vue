@@ -345,7 +345,7 @@ const flowEdges = computed(() => {
     const layoutConn = candidates[usedIdx]
     layoutUsed.set(key, usedIdx + 1)
 
-    const edge = {
+    return {
       id: `${conn.from}-${conn.to}-${i}`,
       source,
       target,
@@ -362,10 +362,6 @@ const flowEdges = computed(() => {
         waypoints: layoutConn?.waypoints,
       },
     }
-    if (target.startsWith('__zone__') || source.startsWith('__zone__')) {
-      console.log('[edge]', conn.from, '->', conn.to, { source, target, sourceHandle: edge.sourceHandle, targetHandle: edge.targetHandle })
-    }
-    return edge
   })
 })
 
@@ -780,6 +776,9 @@ function onPaneDblClick(event: MouseEvent) {
 .vue-flow__node-gsZone .vue-flow__handle {
   width: 8px;
   height: 8px;
+}
+.vue-flow__edge.selected {
+  z-index: 1000 !important;
 }
 .vue-flow__nodesselection-rect,
 .vue-flow__selection {
